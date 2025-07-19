@@ -101,10 +101,3 @@ infra/terraform/     Scripts Terraform
 infra/ansible/       Playbooks Ansible
 ```
 
----
-
-## 📜  Licence
-
-Ce projet est distribué sous licence **MIT**.
-
-> Maintenu par [@anis477](https://github.com/anis477).
