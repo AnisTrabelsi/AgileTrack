@@ -1,0 +1,84 @@
+/* ------------------------------------------------------------------
+   1.  Injecte les couches Tailwind (obligatoire avant toute @apply)
+-------------------------------------------------------------------*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   2.  Variables globales & lissage police (facultatif)
+-------------------------------------------------------------------*/
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* palette par défaut : clair & sombre */
+  color-scheme: light dark;
+
+  /* couleurs du thème sombre */
+  color: rgba(255 255 255 / 0.87);          /* nouvelle syntaxe RGB / alpha */
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ------------------------------------------------------------------
+   3.  Hyperliens de base
+-------------------------------------------------------------------*/
+a {
+  @apply font-medium text-indigo-500 no-underline;
+}
+
+a:hover {
+  @apply text-indigo-600;
+}
+
+/* ------------------------------------------------------------------
+   4.  Structure minimale du body (peut être remplacée par Tailwind)
+-------------------------------------------------------------------*/
+body {
+  @apply m-0 flex min-h-screen min-w-[320px] items-center justify-center;
+}
+
+/* ------------------------------------------------------------------
+   5.  Titres et boutons (exemple)
+-------------------------------------------------------------------*/
+h1 {
+  @apply text-4xl leading-tight;
+}
+
+button {
+  @apply rounded-md border border-transparent bg-gray-900 px-5 py-2
+         text-base font-medium transition-colors hover:border-indigo-500;
+}
+
+button:focus-visible {
+  @apply outline outline-4 -outline-offset-2 outline-indigo-400;
+}
+
+/* ------------------------------------------------------------------
+   6.  Mode clair : on écrase les couleurs sombres
+-------------------------------------------------------------------*/
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    @apply text-indigo-400;
+  }
+  button {
+    @apply bg-gray-100;
+  }
+}
+
+/* ------------------------------------------------------------------
+   7.  Classes utilitaires personnalisées réutilisables
+-------------------------------------------------------------------*/
+.input { @apply border border-gray-300 rounded p-2 w-full; }
+.btn   { @apply bg-blue-600 text-white p-2 rounded hover:bg-blue-700; }
+.card  { @apply bg-white p-6 rounded shadow; }
