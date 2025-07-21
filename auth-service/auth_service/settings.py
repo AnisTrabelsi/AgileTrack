@@ -6,20 +6,19 @@ from pathlib import Path
 from datetime import timedelta
 import os
 
-# Base directory du projet
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ------------------------------------------------------------------
-# Sécurité / Clé secrète (à surcharger en production)
+# Sécurité
 # ------------------------------------------------------------------
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-for-local-only")
-
 DEBUG = True
+
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
 
 # ------------------------------------------------------------------
-# Applications installées
+# Applications
 # ------------------------------------------------------------------
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -28,10 +27,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # apps tierces
+
+    # Tiers
     "rest_framework",
     "rest_framework_simplejwt",
-    # app locale
+    "corsheaders",               # <-- CORS
+
+    # Local
     "users",
 ]
 
@@ -39,6 +41,7 @@ INSTALLED_APPS = [
 # Middleware
 # ------------------------------------------------------------------
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",     # <-- doit venir avant CommonMiddleware
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -69,7 +72,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "auth_service.wsgi.application"
 
 # ------------------------------------------------------------------
-# Base de données PostgreSQL (service auth-db dans docker‑compose)
+# Base de données (PostgreSQL, service auth-db)
 # ------------------------------------------------------------------
 DATABASES = {
     "default": {
@@ -83,7 +86,7 @@ DATABASES = {
 }
 
 # ------------------------------------------------------------------
-# Authentification / JWT
+# REST Framework + JWT
 # ------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -101,16 +104,19 @@ SIMPLE_JWT = {
 }
 
 # ------------------------------------------------------------------
-# Internationalisation
+# CORS : autorise le front Vite (localhost:5173)
+# ------------------------------------------------------------------
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+]
+
+# ------------------------------------------------------------------
+# Internationalisation / statiques
 # ------------------------------------------------------------------
 LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "Europe/Paris"
 USE_I18N = True
 USE_TZ = True
 
-# ------------------------------------------------------------------
-# Fichiers statiques
-# ------------------------------------------------------------------
 STATIC_URL = "static/"
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

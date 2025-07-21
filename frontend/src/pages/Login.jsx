@@ -4,9 +4,12 @@ import { useNavigate } from "react-router-dom";
 
 export default function Login() {
   const { login } = useContext(AuthContext);
-  const [email, setEmail] = useState("");
+
+  // username plutôt que email, Django n'exige pas d'@
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
+
   const navigate = useNavigate();
 
   /* -----------------------------------------------------------
@@ -20,21 +23,23 @@ export default function Login() {
       const res = await fetch("/api/auth/login/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: email, // Django s’attend à « username »
-          password,
-        }),
+        body: JSON.stringify({ username, password }),
       });
 
       if (!res.ok) {
-        throw new Error("Identifiants invalides");
+        // distinguer réseau (fetch) de 400/401 côté API
+        const msg =
+          res.status === 400 || res.status === 401
+            ? "Nom d’utilisateur ou mot de passe incorrect"
+            : `Erreur serveur (${res.status})`;
+        throw new Error(msg);
       }
 
-      const data = await res.json();       // { access, refresh }
-      login(data.access);                  // stocke le JWT dans le contexte
-      navigate("/");                       // redirige vers le dashboard
+      const data = await res.json(); // { access, refresh }
+      login(data.access);            // stocke le JWT
+      navigate("/");                 // redirige vers le dashboard
     } catch (err) {
-      setError(err.message);
+      setError(err.message === "Failed to fetch" ? "API injoignable" : err.message);
     }
   };
 
@@ -54,11 +59,11 @@ export default function Login() {
         )}
 
         <input
-          type="email"
-          placeholder="E‑mail"
+          type="text"
+          placeholder="Nom d’utilisateur"
           className="input mb-3"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
         />
 

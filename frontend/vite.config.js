@@ -1,22 +1,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
 
   /* -----------------------------------------------------------
-     Configuration du serveur de développement
-     - Port 5173 (par défaut)
-     - Proxy : /api -> Django (port 8000)
+     Développement :
+     - host:true → écoute sur toutes les interfaces (utile en conteneur)
+     - HMR : auto
+     - Proxy : toutes les routes /api/** vers Django (8000)
   ----------------------------------------------------------- */
   server: {
+    host: true,
+    port: 5173,
     proxy: {
       "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
-        // réécrit /api/auth/... -> /api/auth/... (pas de suppression du préfixe)
-        // si ton gateway utilise un autre chemin, adapte `rewrite`.
+        // Pas de rewrite ; on laisse /api/... tel quel
+        // Si tu déplaces l'API sur /, active au besoin :
+        // rewrite: path => path.replace(/^\/api/, "")
       },
     },
   },
