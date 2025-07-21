@@ -1,47 +1,46 @@
-/**
- * Page Login
- * ----------
- * Formulaire d’authentification basique.
- * • récupère e‑mail et mot de passe
- * • appelle la fonction `login()` du contexte
- * • redirige vers la racine “/” après succès
- *
- * ⚠️  Pour l’instant, l’appel API est fictif ; on injecte un JWT bidon.
- *     Quand l’Auth‑Service Django sera opérationnel,
- *     il suffira de remplacer le bloc `fakeJwt` par un fetch POST /api/auth/login.
- */
-
 import { useContext, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-  /* -------------------------------------------------------------
-     1. Hooks & contexte
-  --------------------------------------------------------------*/
-  const { login } = useContext(AuthContext); // méthode pour stocker le JWT
-  const [email,    setEmail]    = useState("");
+  const { login } = useContext(AuthContext);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const navigate = useNavigate();            // pour rediriger après login
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
-  /* -------------------------------------------------------------
-     2. Soumission du formulaire
-        – bloque le reload
-        – injecte un JWT factice
-        – redirige vers "/"
-  --------------------------------------------------------------*/
+  /* -----------------------------------------------------------
+     Soumission du formulaire
+  ----------------------------------------------------------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
 
-    // TODO : remplacer par fetch('/api/auth/login', { email, password })
-    const fakeJwt = "dummy-token";
-    login(fakeJwt);
-    navigate("/");
+    try {
+      const res = await fetch("/api/auth/login/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: email, // Django s’attend à « username »
+          password,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Identifiants invalides");
+      }
+
+      const data = await res.json();       // { access, refresh }
+      login(data.access);                  // stocke le JWT dans le contexte
+      navigate("/");                       // redirige vers le dashboard
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  /* -------------------------------------------------------------
-     3. Rendu JSX – formulaire centré
-  --------------------------------------------------------------*/
+  /* -----------------------------------------------------------
+     Interface
+  ----------------------------------------------------------- */
   return (
     <div className="h-screen flex items-center justify-center bg-gray-100">
       <form
@@ -50,27 +49,28 @@ export default function Login() {
       >
         <h1 className="text-2xl font-semibold mb-4 text-center">Connexion</h1>
 
-        {/* Champ e-mail */}
+        {error && (
+          <p className="mb-3 text-sm text-red-600 text-center">{error}</p>
+        )}
+
         <input
           type="email"
           placeholder="E‑mail"
-          className="input w-full mb-3"
+          className="input mb-3"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
         />
 
-        {/* Champ mot de passe */}
         <input
           type="password"
           placeholder="Mot de passe"
-          className="input w-full mb-4"
+          className="input mb-4"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
 
-        {/* Bouton soumettre */}
         <button className="btn w-full" type="submit">
           Se connecter
         </button>

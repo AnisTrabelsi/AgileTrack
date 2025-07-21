@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  # Base de données PostgreSQL
+  auth-db:
+    image: postgres:15
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    networks: [devopstrack]
+
+  # Service Django Auth
+  auth-service:
+    build:
+      context: ../auth-service   # chemin relatif depuis le dossier deploy/
+    container_name: auth-service
+    environment:
+      DJANGO_SECRET_KEY: "super-secret-dev-key"
+    depends_on:
+      - auth-db
+    networks: [devopstrack]
+    ports:
+      - "8000:8000"   # exposition temporaire pour les tests locaux
+
+networks:
+  devopstrack:
+
+volumes:
+  auth-db-data:
