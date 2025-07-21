@@ -1,7 +1,7 @@
-version: "3.9"
-
+# version: "3.9"  ← optionnel : Compose V2 n’en a plus besoin
 services:
-  # Base de données PostgreSQL
+
+  # -------------------- PostgreSQL --------------------
   auth-db:
     image: postgres:15
     container_name: auth-db
@@ -11,23 +11,61 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - auth-db-data:/var/lib/postgresql/data
+    healthcheck:                       # ← ping pour attendre le ready
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 5
     networks: [devopstrack]
 
-  # Service Django Auth
+  # -------------------- Django Auth -------------------
   auth-service:
     build:
-      context: ../auth-service   # chemin relatif depuis le dossier deploy/
+      context: ../auth-service
     container_name: auth-service
     environment:
       DJANGO_SECRET_KEY: "super-secret-dev-key"
+      POSTGRES_DB: auth                  # ← mêmes creds que le DB
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: auth-db
     depends_on:
-      - auth-db
-    networks: [devopstrack]
+      auth-db:
+        condition: service_healthy       # ← attend le healthcheck
     ports:
-      - "8000:8000"   # exposition temporaire pour les tests locaux
+      - "8000:8000"                      # expose pour test local
+    networks: [devopstrack]
 
+  # -------------------- MongoDB -----------------------
+  projects-db:
+    image: mongo:6
+    container_name: projects-db
+    volumes:
+      - projects-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      retries: 5
+    networks: [devopstrack]
+
+  # --------------- FastAPI Projects -------------------
+  projects-service:
+    build:
+      context: ../projects-service
+    container_name: projects-service
+    environment:
+      MONGO_URL: mongodb://projects-db:27017
+      JWT_SECRET: super-secret-dev-key
+    depends_on:
+      projects-db:
+        condition: service_healthy
+    ports:
+      - "8001:8001"                      # exposition temporaire
+    networks: [devopstrack]
+
+# -------------------- Réseaux & volumes ---------------
 networks:
   devopstrack:
 
 volumes:
   auth-db-data:
+  projects-data:
