@@ -1,56 +1,77 @@
-const express = require("express");
-const Redis = require("ioredis");
-const { v4: uuid } = require("uuid");
-const jwt = require("jsonwebtoken");
+// tasks-service/index.js
+import express from "express";
+import Redis from "ioredis";
+import { v4 as uuid } from "uuid";
+import jwt from "jsonwebtoken";
 
-const redis = new Redis({
-  host: "tasks-redis",
-  port: 6379,
-});
+/* ------------------------------------------------------------------ */
+/*  Configuration via variables d’environnement                        */
+/* ------------------------------------------------------------------ */
+const {
+  PORT = 8002,
+  REDIS_URL = "redis://tasks-redis:6379",
+  JWT_SECRET = "dev-secret",
+} = process.env;
 
+const redis = new Redis(REDIS_URL);
 const app = express();
 app.use(express.json());
 
-const SECRET = process.env.JWT_SECRET || "dev-secret";
-
-// Middleware pour authentifier via JWT
+/* ------------------------------------------------------------------ */
+/*  Middleware JWT (Authorization: Bearer <token>)                     */
+/* ------------------------------------------------------------------ */
 function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: "No token provided" });
+  const [scheme, token] = (req.headers.authorization ?? "").split(" ");
 
-  const token = authHeader.split(" ")[1];
+  if (scheme !== "Bearer" || !token) {
+    return res.status(401).json({ error: "Token manquant" });
+  }
   try {
-    const decoded = jwt.verify(token, SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token" });
+    req.user = jwt.verify(token, JWT_SECRET); // { id, email, … }
+    return next();
+  } catch {
+    return res.status(401).json({ error: "Token invalide ou expiré" });
   }
 }
 
-// Endpoint pour ajouter une tâche
-app.post("/tasks", authenticate, async (req, res) => {
-  const { title } = req.body;
-  if (!title) return res.status(400).json({ error: "Missing title" });
+/* ------------------------------------------------------------------ */
+/*  Routes API                                                         */
+/* ------------------------------------------------------------------ */
+
+// POST /api/tasks  → crée une tâche pour l’utilisateur connecté
+app.post("/api/tasks", authenticate, async (req, res) => {
+  const { title = "build" } = req.body;
 
   const task = {
     id: uuid(),
     user: req.user.id,
     title,
-    done: false,
+    status: "queued",
+    ts: Date.now(),
   };
 
   await redis.lpush(`tasks:${req.user.id}`, JSON.stringify(task));
   res.status(201).json(task);
+
+  // Simule la fin du job après 10 s
+  setTimeout(async () => {
+    task.status = "done";
+    await redis.lset(`tasks:${req.user.id}`, 0, JSON.stringify(task));
+  }, 10_000);
 });
 
-// Endpoint pour lister les tâches
-app.get("/tasks", authenticate, async (req, res) => {
-  const tasks = await redis.lrange(`tasks:${req.user.id}`, 0, -1);
-  res.json(tasks.map(JSON.parse));
+// GET /api/tasks  → liste des tâches de l’utilisateur connecté
+app.get("/api/tasks", authenticate, async (req, res) => {
+  const raw = await redis.lrange(`tasks:${req.user.id}`, 0, -1);
+  res.json(raw.map(JSON.parse));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Tasks service running on port ${PORT}`);
-});
+// Healthcheck (pour le depends_on)
+app.get("/health", (_, res) => res.send("OK"));
+
+/* ------------------------------------------------------------------ */
+/*  Lancement serveur                                                  */
+/* ------------------------------------------------------------------ */
+app.listen(PORT, () =>
+  console.log(`Tasks‑service prêt sur http://0.0.0.0:${PORT}`)
+);

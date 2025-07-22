@@ -1,25 +1,37 @@
+// frontend/vite.config.js
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+/**
+ * Configuration Vite (développement uniquement)
+ * - HMR activé
+ * - host:true → accessible en réseau local ou via conteneurs Docker
+ * - proxy : redirige les appels API vers leurs microservices respectifs
+ */
 export default defineConfig({
   plugins: [react()],
 
-  /* -----------------------------------------------------------
-     Développement :
-     - host:true → écoute sur toutes les interfaces (utile en conteneur)
-     - HMR : auto
-     - Proxy : toutes les routes /api/** vers Django (8000)
-  ----------------------------------------------------------- */
   server: {
     host: true,
     port: 5173,
+
     proxy: {
-      "/api": {
+      // Auth Service (Django)
+      "/api/auth": {
         target: "http://localhost:8000",
         changeOrigin: true,
-        // Pas de rewrite ; on laisse /api/... tel quel
-        // Si tu déplaces l'API sur /, active au besoin :
-        // rewrite: path => path.replace(/^\/api/, "")
+      },
+
+      // Projects Service (FastAPI)
+      "/api/projects": {
+        target: "http://localhost:8001",
+        changeOrigin: true,
+      },
+
+      // Tasks Service (Node.js)
+      "/api/tasks": {
+        target: "http://localhost:8002",
+        changeOrigin: true,
       },
     },
   },

@@ -1,20 +1,14 @@
-# Utilise une image légère de Node.js
+# tasks-service/Dockerfile
 FROM node:22-alpine
 
-# Définit le dossier de travail dans le conteneur
-WORKDIR /app
+WORKDIR /code
 
-# Copie uniquement les fichiers nécessaires pour installer les dépendances
+# 1. Dépendances
 COPY package*.json ./
+RUN npm ci --production
 
-# Installe uniquement les dépendances de production
-RUN npm ci --omit=dev
+# 2. Source
+COPY src ./src
 
-# Copie le reste des fichiers du projet
-COPY . .
-
-# Expose le port sur lequel le service écoute
 EXPOSE 8002
-
-# Commande de démarrage du service
-CMD ["node", "index.js"]
+CMD ["node", "src/server.js"]   # <‑‑ chemin mis à jour

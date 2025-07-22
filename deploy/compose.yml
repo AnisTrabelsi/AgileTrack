@@ -1,4 +1,5 @@
-# version: "3.9"  # ← facultatif avec Docker Compose V2
+# deploy/compose.yml
+version: "3.9"          # ← facultatif en V2, mais garde‑le pour la lisibilité
 
 services:
   # -------------------- PostgreSQL --------------------
@@ -6,8 +7,8 @@ services:
     image: postgres:15
     container_name: auth-db
     environment:
-      POSTGRES_DB: auth
-      POSTGRES_USER: postgres
+      POSTGRES_DB:       auth
+      POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: postgres
     volumes:
       - auth-db-data:/var/lib/postgresql/data
@@ -17,44 +18,44 @@ services:
       retries: 5
     networks: [devopstrack]
 
-  # -------------------- Django Auth --------------------
+  # -------------------- Django Auth -------------------
   auth-service:
     build:
-      context: ../auth-service
+      context: ../auth-service          # chemin depuis deploy/
     container_name: auth-service
     environment:
-      DJANGO_SECRET_KEY: super-secret-dev-key
-      POSTGRES_DB: auth
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST: auth-db
+      DJANGO_SECRET_KEY:  super-secret-dev-key
+      POSTGRES_DB:        auth
+      POSTGRES_USER:      postgres
+      POSTGRES_PASSWORD:  postgres
+      POSTGRES_HOST:      auth-db
     depends_on:
       auth-db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8000:8000"                     # exposé en local
     networks: [devopstrack]
 
-  # -------------------- MongoDB ------------------------
+  # -------------------- MongoDB -----------------------
   projects-db:
     image: mongo:6
     container_name: projects-db
     volumes:
       - projects-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       retries: 5
     networks: [devopstrack]
 
-  # ------------------ FastAPI Projects -----------------
+  # --------------- FastAPI Projects -------------------
   projects-service:
     build:
       context: ../projects-service
     container_name: projects-service
     environment:
-      MONGO_URL: mongodb://projects-db:27017
-      JWT_SECRET: super-secret-dev-key
+      MONGO_URL:   mongodb://projects-db:27017
+      JWT_SECRET:  super-secret-dev-key
     depends_on:
       projects-db:
         condition: service_healthy
@@ -62,29 +63,49 @@ services:
       - "8001:8001"
     networks: [devopstrack]
 
-  # ---------------------- Redis ------------------------
+  # ---------------------- Redis -----------------------
   tasks-redis:
     image: redis:7-alpine
     container_name: tasks-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
     networks: [devopstrack]
 
-  # ------------------ NodeJS Tasks ---------------------
+  # ---------------- NodeJS Tasks API ------------------
   tasks-service:
     build:
       context: ../tasks-service
     container_name: tasks-service
+    command: node src/server.js        # démarre l’API
     environment:
-      - JWT_SECRET=super-secret-dev-key
+      JWT_SECRET: super-secret-dev-key
+      REDIS_URL:  redis://tasks-redis:6379
     depends_on:
-      - tasks-redis
+      tasks-redis:
+        condition: service_healthy
     ports:
       - "8002:8002"
     networks: [devopstrack]
 
-# ---------------- Réseaux & Volumes ---------------------
+  # -------------- NodeJS Tasks Worker -----------------
+  tasks-worker:
+    build:
+      context: ../tasks-service
+    container_name: tasks-worker
+    command: node src/worker.js        # boucle de traitement asynchrone
+    environment:
+      REDIS_URL: redis://tasks-redis:6379
+    depends_on:
+      tasks-redis:
+        condition: service_healthy
+    networks: [devopstrack]
+
+# ---------------- Réseaux & volumes -------------------
 networks:
-  devopstrack:
+  devopstrack: {}
 
 volumes:
-  auth-db-data:
-  projects-data:
+  auth-db-data:   {}
+  projects-data:  {}
