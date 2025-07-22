@@ -1,65 +1,107 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { AuthContext } from "../context/AuthContext";
 import ProjectCard from "../components/ProjectCard";
 import TaskCard from "../components/TaskCard";
 
 export default function Dashboard() {
-  // 🔐 Stocker le token JWT (peut aussi venir d'un contexte global)
-  const [token, setToken] = useState("");
+  /* -----------------------------------------------------------
+     Contexte JWT
+  ----------------------------------------------------------- */
+  const { token, logout } = useContext(AuthContext);
 
-  // 📦 Liste des projets à afficher (sera remplie avec un appel API)
+  /* -----------------------------------------------------------
+     États locaux
+  ----------------------------------------------------------- */
   const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [loadingProj, setLoadingProj] = useState(true);
 
-  // 🛠️ Données factices pour les tâches CI/CD
-  const tasks = [
-    { id: "a1b2c3d4", status: "queued" },
-    { id: "e5f6g7h8", status: "done" },
-  ];
+  /* -----------------------------------------------------------
+     Helper générique d'appel API
+  ----------------------------------------------------------- */
+  const apiFetch = (url, signal) =>
+    fetch(url, {
+      signal,
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((r) => {
+      if (r.status === 401) logout();     // token expiré
+      if (!r.ok) return Promise.reject();
+      return r.json();
+    });
 
-  // 📡 Appel API au chargement du composant pour récupérer les projets
+  /* -----------------------------------------------------------
+     Charger les projets au montage
+  ----------------------------------------------------------- */
   useEffect(() => {
-    const jwt = localStorage.getItem("token"); // récupération du token JWT depuis le localStorage
-    setToken(jwt); // mise à jour du state local
+    if (!token) return;
+    const ctl = new AbortController();
 
-    if (!jwt) return; // si pas de token, ne rien faire
+    apiFetch("/api/projects", ctl.signal)
+      .then(setProjects)
+      .catch(() => console.error("Impossible de charger les projets"))
+      .finally(() => setLoadingProj(false));
 
-    // Appel à l'API protégée
-    fetch("/api/projects", {
-      headers: {
-        Authorization: `Bearer ${jwt}`, // envoi du token dans le header
-      },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Erreur lors du chargement des projets");
-        return res.json(); // conversion en JSON
-      })
-      .then((data) => setProjects(data)) // mise à jour de la liste des projets
-      .catch((err) => console.error(err)); // gestion des erreurs
-  }, []);
+    return () => ctl.abort();
+  }, [token]);
 
-  // 🧱 Rendu principal du tableau de bord
+  /* -----------------------------------------------------------
+     Charger les tâches et poller toutes les 3 s
+  ----------------------------------------------------------- */
+  useEffect(() => {
+    if (!token) return;
+
+    const ctl = new AbortController();
+    const load = () =>
+      apiFetch("/api/tasks", ctl.signal)
+        .then(setTasks)
+        .catch(() => console.error("Impossible de charger les tâches"));
+
+    load();                                // appel initial
+    const id = setInterval(load, 3000);    // polling 3 s
+    return () => {
+      ctl.abort();
+      clearInterval(id);
+    };
+  }, [token]);
+
+  /* -----------------------------------------------------------
+     Rendu
+  ----------------------------------------------------------- */
   return (
     <div className="p-8 space-y-6">
       <h1 className="text-3xl font-bold">Dashboard</h1>
 
-      {/* Bloc Projets */}
+      {/* ----------- Projets ----------- */}
       <section>
         <h2 className="text-xl font-semibold mb-2">Projets</h2>
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-          {/* Affichage dynamique des projets avec ProjectCard */}
-          {projects.map((p) => (
-            <ProjectCard key={p.id} {...p} />
-          ))}
-        </div>
+        {loadingProj ? (
+          <p className="text-sm text-gray-500">Chargement…</p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+            {projects.map((p) => (
+              <ProjectCard key={p._id ?? p.id} {...p} />
+            ))}
+            {projects.length === 0 && (
+              <p className="text-sm text-gray-500">
+                Aucun projet pour l’instant.
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
-      {/* Bloc Tâches CI/CD */}
+      {/* ----------- Tâches CI/CD ----------- */}
       <section>
         <h2 className="text-xl font-semibold mb-2">Tâches CI/CD</h2>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-          {/* Affichage statique des tâches */}
           {tasks.map((t) => (
             <TaskCard key={t.id} {...t} />
           ))}
+          {tasks.length === 0 && (
+            <p className="text-sm text-gray-500">
+              Aucune tâche en cours. Lance un build pour commencer !
+            </p>
+          )}
         </div>
       </section>
     </div>

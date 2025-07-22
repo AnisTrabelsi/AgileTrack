@@ -1,6 +1,6 @@
-# version: "3.9"  ← optionnel : Compose V2 n’en a plus besoin
-services:
+# version: "3.9"  # ← facultatif avec Docker Compose V2
 
+services:
   # -------------------- PostgreSQL --------------------
   auth-db:
     image: postgres:15
@@ -11,31 +11,31 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - auth-db-data:/var/lib/postgresql/data
-    healthcheck:                       # ← ping pour attendre le ready
+    healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       retries: 5
     networks: [devopstrack]
 
-  # -------------------- Django Auth -------------------
+  # -------------------- Django Auth --------------------
   auth-service:
     build:
       context: ../auth-service
     container_name: auth-service
     environment:
-      DJANGO_SECRET_KEY: "super-secret-dev-key"
-      POSTGRES_DB: auth                  # ← mêmes creds que le DB
+      DJANGO_SECRET_KEY: super-secret-dev-key
+      POSTGRES_DB: auth
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_HOST: auth-db
     depends_on:
       auth-db:
-        condition: service_healthy       # ← attend le healthcheck
+        condition: service_healthy
     ports:
-      - "8000:8000"                      # expose pour test local
+      - "8000:8000"
     networks: [devopstrack]
 
-  # -------------------- MongoDB -----------------------
+  # -------------------- MongoDB ------------------------
   projects-db:
     image: mongo:6
     container_name: projects-db
@@ -47,7 +47,7 @@ services:
       retries: 5
     networks: [devopstrack]
 
-  # --------------- FastAPI Projects -------------------
+  # ------------------ FastAPI Projects -----------------
   projects-service:
     build:
       context: ../projects-service
@@ -59,10 +59,29 @@ services:
       projects-db:
         condition: service_healthy
     ports:
-      - "8001:8001"                      # exposition temporaire
+      - "8001:8001"
     networks: [devopstrack]
 
-# -------------------- Réseaux & volumes ---------------
+  # ---------------------- Redis ------------------------
+  tasks-redis:
+    image: redis:7-alpine
+    container_name: tasks-redis
+    networks: [devopstrack]
+
+  # ------------------ NodeJS Tasks ---------------------
+  tasks-service:
+    build:
+      context: ../tasks-service
+    container_name: tasks-service
+    environment:
+      - JWT_SECRET=super-secret-dev-key
+    depends_on:
+      - tasks-redis
+    ports:
+      - "8002:8002"
+    networks: [devopstrack]
+
+# ---------------- Réseaux & Volumes ---------------------
 networks:
   devopstrack:
 
