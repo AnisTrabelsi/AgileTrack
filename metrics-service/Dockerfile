@@ -8,6 +8,6 @@ RUN CGO_ENABLED=0 go build -o /bin/metrics-service ./cmd/server
 
 # --- runtime stage ---
 FROM alpine:3.20
-EXPOSE 9100     # port Prometheus
+EXPOSE 9100     
 ENTRYPOINT ["/metrics-service"]
 COPY --from=build /bin/metrics-service /metrics-service
