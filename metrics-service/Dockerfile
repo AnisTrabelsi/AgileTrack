@@ -1,13 +1,14 @@
-# --- build stage ---
+# ---- build stage -------------------------------------------------
 FROM golang:1.22-alpine AS build
 WORKDIR /src
-COPY go.* ./
+COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /bin/metrics-service ./cmd/server
 
-# --- runtime stage ---
-FROM alpine:3.20
-EXPOSE 9100     
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /metrics-service ./cmd/server
+
+# ---- runtime stage (distroless) ---------------------------------
+FROM gcr.io/distroless/static
+COPY --from=build /metrics-service /metrics-service
+EXPOSE 9100
 ENTRYPOINT ["/metrics-service"]
-COPY --from=build /bin/metrics-service /metrics-service
