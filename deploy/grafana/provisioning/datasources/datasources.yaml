@@ -1,0 +1,27 @@
+apiVersion: 1
+
+datasources:
+  # --------------------------------------------------
+  # Prometheus : par défaut
+  # --------------------------------------------------
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    isDefault: true   # ←  un seul bloc « default »
+
+  # --------------------------------------------------
+  # InfluxDB (Flux)
+  # --------------------------------------------------
+  - name: InfluxDB
+    type: grafana-influxdb-flux-datasource
+    access: proxy
+    url: http://metrics-db:8086
+    jsonData:
+      version: Flux
+      organization: devopstrack
+      defaultBucket: metrics
+      tlsSkipVerify: true
+    secureJsonData:
+      token: dev-token
+    isDefault: false  # ← mettre false, ou supprimer la ligne

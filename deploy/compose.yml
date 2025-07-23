@@ -1,26 +1,25 @@
+# deploy/compose.yml
+# ──────────────────────────────────────────────────────────────────────
+#  Déploiement de la stack DevOpsTrack (local / POC)                    #
+#  - Auth, Projects, Tasks, Metrics, Prometheus, Grafana                #
+#  - + Nexus 3 (registry privé)                                         #
+#  - + SonarQube (analyse qualité)                                      #
+# ──────────────────────────────────────────────────────────────────────
+# NB : le champ version est inutile en Compose v2, on le garde
+#      pour la lisibilité.
+version: "3.9"
 
-############################
-#  Réseaux & volumes       #
-############################
-networks:
-  devopstrack:
-
-volumes:
-  auth-db-data:
-  projects-data:
-  metrics-data:
-
-############################
-#        Services          #
-############################
+########################################################################
+#                               Services                               #
+########################################################################
 services:
-  # ---------- PostgreSQL ----------
+  # ─────────────────── PostgreSQL (Auth) ──────────────────────────────
   auth-db:
     image: postgres:15
     container_name: auth-db
     environment:
-      POSTGRES_DB: auth
-      POSTGRES_USER: postgres
+      POSTGRES_DB:       auth
+      POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: postgres
     volumes:
       - auth-db-data:/var/lib/postgresql/data
@@ -28,58 +27,47 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       retries: 5
-    networks:
-      - devopstrack
+    networks: [devopstrack]
 
-  # ---------- Django Auth ----------
+  # ─────────────────── Django : Auth‑Service ──────────────────────────
   auth-service:
-    build:
-      context: ../auth-service
+    build: { context: ../auth-service }
     container_name: auth-service
     environment:
       DJANGO_SECRET_KEY: super-secret-dev-key
-      POSTGRES_DB: auth
-      POSTGRES_USER: postgres
+      POSTGRES_DB:       auth
+      POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST: auth-db
+      POSTGRES_HOST:     auth-db
     depends_on:
-      auth-db:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
-    networks:
-      - devopstrack
+      auth-db: { condition: service_healthy }
+    ports: ["8000:8000"]
+    networks: [devopstrack]
 
-  # ------------ MongoDB ------------
+  # ─────────────────────────── MongoDB ────────────────────────────────
   projects-db:
     image: mongo:6
     container_name: projects-db
-    volumes:
-      - projects-data:/data/db
+    volumes: [ projects-data:/data/db ]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       retries: 5
-    networks:
-      - devopstrack
+    networks: [devopstrack]
 
-  # ------ FastAPI Projects API -----
+  # ───────────── FastAPI Projects‑Service (API) ───────────────────────
   projects-service:
-    build:
-      context: ../projects-service
+    build: { context: ../projects-service }
     container_name: projects-service
     environment:
-      MONGO_URL: mongodb://projects-db:27017
+      MONGO_URL:  mongodb://projects-db:27017
       JWT_SECRET: super-secret-dev-key
     depends_on:
-      projects-db:
-        condition: service_healthy
-    ports:
-      - "8001:8001"
-    networks:
-      - devopstrack
+      projects-db: { condition: service_healthy }
+    ports: ["8001:8001"]
+    networks: [devopstrack]
 
-  # --------------- Redis -----------
+  # ─────────────────────────── Redis ──────────────────────────────────
   tasks-redis:
     image: redis:7-alpine
     container_name: tasks-redis
@@ -87,88 +75,137 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 5
-    networks:
-      - devopstrack
+    networks: [devopstrack]
 
-  # --------- Tasks REST API --------
+  # ──────────────── Tasks REST API (Node.js) ──────────────────────────
   tasks-service:
-    build:
-      context: ../tasks-service
+    build: { context: ../tasks-service }
     container_name: tasks-service
     command: ["node", "src/server.js"]
     environment:
       JWT_SECRET: super-secret-dev-key
-      REDIS_URL: redis://tasks-redis:6379
+      REDIS_URL:  redis://tasks-redis:6379
     depends_on:
-      tasks-redis:
-        condition: service_healthy
-    ports:
-      - "8002:8002"
-    networks:
-      - devopstrack
+      tasks-redis: { condition: service_healthy }
+    ports: ["8002:8002"]
+    networks: [devopstrack]
 
-  # -------- Tasks Background --------
+  # ──────────────── Tasks Worker (background) ─────────────────────────
   tasks-worker:
-    build:
-      context: ../tasks-service
+    build: { context: ../tasks-service }
     container_name: tasks-worker
     command: ["node", "src/worker.js"]
     environment:
       REDIS_URL: redis://tasks-redis:6379
     depends_on:
-      tasks-redis:
-        condition: service_healthy
-    networks:
-      - devopstrack
+      tasks-redis: { condition: service_healthy }
+    networks: [devopstrack]
 
-  # ------------- InfluxDB ----------
+  # ─────────────────────── InfluxDB v2 ────────────────────────────────
   metrics-db:
     image: influxdb:2.7
     container_name: metrics-db
-    volumes:
-      - metrics-data:/var/lib/influxdb2
+    volumes: [ metrics-data:/var/lib/influxdb2 ]
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: admin123
-      DOCKER_INFLUXDB_INIT_ORG: devopstrack
-      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_MODE:        setup
+      DOCKER_INFLUXDB_INIT_USERNAME:    admin
+      DOCKER_INFLUXDB_INIT_PASSWORD:    admin123
+      DOCKER_INFLUXDB_INIT_ORG:         devopstrack
+      DOCKER_INFLUXDB_INIT_BUCKET:      metrics
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev-token
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 10s
       retries: 5
-    networks:
-      - devopstrack
+    networks: [devopstrack]
 
-  # ------- Metrics service (Go) ----
+  # ───────────── Metrics‑Service (Go + Prometheus) ────────────────────
   metrics-service:
-    build:
-      context: ../metrics-service
+    build: { context: ../metrics-service }
     container_name: metrics-service
     environment:
-      INFLUX_URL: http://metrics-db:8086
-      INFLUX_ORG: devopstrack
-      INFLUX_BUCKET: metrics
-      INFLUX_TOKEN: dev-token
+      INFLUXDB_URL:    http://metrics-db:8086
+      INFLUXDB_ORG:    devopstrack
+      INFLUXDB_BUCKET: metrics
+      INFLUXDB_TOKEN:  dev-token
     depends_on:
-      metrics-db:
-        condition: service_healthy
-    ports:
-      - "9100:9100"      # /metrics (Prometheus)
-    networks:
-      - devopstrack
+      metrics-db: { condition: service_healthy }
+    ports: ["9100:9100"]    # /metrics
+    networks: [devopstrack]
 
-  # ------------ Prometheus ---------
+  # ───────────────────────── Prometheus ───────────────────────────────
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
-      metrics-service:
-        condition: service_started
+      metrics-service: { condition: service_started }
+    ports: ["9090:9090"]
+    networks: [devopstrack]
+
+  # ────────────────────────── Grafana ─────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS:         grafana-influxdb-flux-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus: { condition: service_started }
+      metrics-db: { condition: service_healthy }
+    ports: ["3000:3000"]
+    networks: [devopstrack]
+
+  # ─────────────────────────── Nexus 3 ────────────────────────────────
+  nexus:
+    image: sonatype/nexus3:3.70.0
+    container_name: nexus
     ports:
-      - "9090:9090"
-    networks:
-      - devopstrack
+      - "8081:8081"   # UI / API
+      - "8083:8083"   # Registry Docker (HTTP/HTTPS – même port)
+    volumes:
+      - nexus-data:/nexus-data
+    networks: [devopstrack]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
+      interval: 30s
+      retries: 10
+
+  # ───────────────────────── SonarQube ────────────────────────────────
+  sonarqube:
+    image: sonarqube:10.5-community
+    container_name: sonarqube
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "9020:9000"
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-logs:/opt/sonarqube/logs
+      - sonarqube-extensions:/opt/sonarqube/extensions
+    networks: [devopstrack]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/health"]
+      interval: 30s
+      retries: 10
+
+########################################################################
+#                          Réseau & volumes                            #
+########################################################################
+networks:
+  devopstrack: {}
+
+volumes:
+  auth-db-data:     {}
+  projects-data:    {}
+  metrics-data:     {}
+  grafana-data:     {}
+  nexus-data:       {}   # stockage Nexus (blobs, conf)
+  sonarqube-data:   {}
+  sonarqube-logs:   {}
+  sonarqube-extensions: {}

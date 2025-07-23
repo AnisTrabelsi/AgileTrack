@@ -1,3 +1,9 @@
+// metrics‑service/cmd/server/main.go
+//
+//  • Expose /metrics pour Prometheus
+//  • Push la même métrique dans InfluxDB v2 (“metrics” bucket)
+// ------------------------------------------------------------------
+
 package main
 
 import (
@@ -12,54 +18,75 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var (
-	demoGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "devopstrack",
-			Name:      "demo_value",
-			Help:      "Exemple de métrique exportée et envoyée à InfluxDB",
-		},
-	)
-)
+/*───────────────────────────────────────────────────────────────
+  Prometheus ‑ Gauge « demo_value »
+───────────────────────────────────────────────────────────────*/
+var demoGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: "devopstrack",
+	Name:      "demo_value",
+	Help:      "Exemple de métrique exportée (Prometheus) et stockée (InfluxDB)",
+})
 
-func main() {
-	// --- Prometheus ---
+func init() { // registre la métrique au démarrage
 	prometheus.MustRegister(demoGauge)
-	http.Handle("/metrics", promhttp.Handler())
+}
 
-	// --- InfluxDB ---
-	influxURL := os.Getenv("INFLUXDB_URL")
-	influxOrg := os.Getenv("INFLUXDB_ORG")
-	influxBucket := os.Getenv("INFLUXDB_BUCKET")
-	influxToken := os.Getenv("INFLUXDB_TOKEN")
-
-	if influxURL == "" || influxOrg == "" || influxBucket == "" || influxToken == "" {
-		log.Fatal("⛔️ Variables d'environnement InfluxDB manquantes. Vérifie INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN.")
+/*───────────────────────────────────────────────────────────────
+  Helper : lit une variable d’env. ou plante
+───────────────────────────────────────────────────────────────*/
+func mustEnv(key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
+	log.Fatalf("⛔️ variable d'environnement %s manquante", key)
+	return ""
+}
 
-	client := influxdb2.NewClient(influxURL, influxToken)
+/*───────────────────────────────────────────────────────────────
+  Router HTTP (exposé pour les tests unitaires)
+───────────────────────────────────────────────────────────────*/
+func setupRouter() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	return mux
+}
+
+/*───────────────────────────────────────────────────────────────
+  main
+───────────────────────────────────────────────────────────────*/
+func main() {
+	/*—— Config InfluxDB (les noms DOIVENT correspondre au compose) ——*/
+	url := mustEnv("INFLUXDB_URL")
+	org := mustEnv("INFLUXDB_ORG")
+	bucket := mustEnv("INFLUXDB_BUCKET")
+	token := mustEnv("INFLUXDB_TOKEN")
+
+	client := influxdb2.NewClient(url, token)
 	defer client.Close()
-	writeAPI := client.WriteAPIBlocking(influxOrg, influxBucket)
+	writeAPI := client.WriteAPIBlocking(org, bucket)
 
-	// boucle : met à jour la gauge + écrit dans Influx
+	/*—— Boucle : met à jour Prom + écrit un point InfluxDB ——*/
 	go func() {
 		for {
 			val := float64(time.Now().Second())
-			demoGauge.Set(val)
+			demoGauge.Set(val) // Prometheus
 
-			p := influxdb2.NewPoint(
+			pt := influxdb2.NewPoint(
 				"demo_value",
 				nil,
 				map[string]interface{}{"value": val},
 				time.Now(),
 			)
-			if err := writeAPI.WritePoint(context.Background(), p); err != nil {
-				log.Println("write point:", err)
+			if err := writeAPI.WritePoint(context.Background(), pt); err != nil {
+				log.Printf("❗ write InfluxDB : %v", err)
 			}
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	log.Println("metrics-service listening on :9100")
-	log.Fatal(http.ListenAndServe(":9100", nil))
+	/*—— HTTP server ——*/
+	log.Println("metrics‑service en écoute sur :9100 (/metrics)")
+	if err := http.ListenAndServe(":9100", setupRouter()); err != nil {
+		log.Fatalf("Serveur HTTP arrêté : %v", err)
+	}
 }

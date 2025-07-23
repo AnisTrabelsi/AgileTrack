@@ -1,0 +1,12 @@
+# grafana/provisioning/dashboards/dashboards.yaml
+apiVersion: 1
+
+providers:
+  - name: "default"
+    orgId: 1
+    type: file
+    allowUiUpdates: true        # ↳ possibilité d’éditer depuis l’UI
+    disableDeletion: false
+    updateIntervalSeconds: 30   # ↳ Grafana rescanne toutes les 30 s
+    options:
+      path: /etc/grafana/provisioning/dashboards
