@@ -28,10 +28,14 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 
 	// --- InfluxDB ---
-	influxURL := os.Getenv("INFLUX_URL")
-	influxOrg := os.Getenv("INFLUX_ORG")
-	influxBucket := os.Getenv("INFLUX_BUCKET")
-	influxToken := os.Getenv("INFLUX_TOKEN")
+	influxURL := os.Getenv("INFLUXDB_URL")
+	influxOrg := os.Getenv("INFLUXDB_ORG")
+	influxBucket := os.Getenv("INFLUXDB_BUCKET")
+	influxToken := os.Getenv("INFLUXDB_TOKEN")
+
+	if influxURL == "" || influxOrg == "" || influxBucket == "" || influxToken == "" {
+		log.Fatal("⛔️ Variables d'environnement InfluxDB manquantes. Vérifie INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN.")
+	}
 
 	client := influxdb2.NewClient(influxURL, influxToken)
 	defer client.Close()
