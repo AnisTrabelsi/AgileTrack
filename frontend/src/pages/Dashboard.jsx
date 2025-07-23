@@ -1,85 +1,93 @@
+// src/pages/Dashboard.jsx
 import { useContext, useEffect, useState } from "react";
-import { AuthContext } from "../context/AuthContext";
-import ProjectCard from "../components/ProjectCard";
-import TaskCard from "../components/TaskCard";
-import { useTasks, createTask } from "../hooks/useTasks"; // ← le fichier doit être dans  src/hooks/useTasks.js
+import { AuthContext }   from "../context/AuthContext";
+import { useTasks, createTask }   from "../hooks/useTasks";
+import { useProjects, createProject } from "../hooks/useProjects";
 
-/**
- * Tableau de bord : projets + tâches CI/CD en temps réel.
- */
+import NavBar       from "../components/NavBar";
+import ProjectCard  from "../components/ProjectCard";
+import TaskCard     from "../components/TaskCard";
+import NewProjectForm from "../components/NewProjectForm";
+
+/* ------------------------------------------------------------------ */
+/*  Tableau de bord (pages protégée)                                   */
+/* ------------------------------------------------------------------ */
 export default function Dashboard() {
-  /* ---------------------- Auth ---------------------- */
+  /* ---------- Auth ---------- */
   const { token, logout } = useContext(AuthContext);
 
-  /* -------------------- Projets --------------------- */
-  const [projects, setProjects] = useState([]);
-  const [loadingProj, setLoadingProj] = useState(true);
+  /* ---------- Projets ---------- */
+  // hook réutilisable avec rafraîchissement manuel (pas de polling ici)
+  const { projects, loading, setProjects } = useProjects(token);
+  const [showForm, setShowForm] = useState(false);
 
-  /** Appel générique protégé */
-  const apiFetch = (url, signal) =>
-    fetch(url, {
-      signal,
-      headers: { Authorization: `Bearer ${token}` },
-    }).then((r) => {
-      if (r.status === 401) logout();          // JWT expiré
-      if (!r.ok) throw new Error();            // autre erreur
-      return r.json();
-    });
+  // Création de projet
+  const handleCreateProject = async (payload) => {
+    try {
+      const proj = await createProject(token, payload);
+      // mise à jour optimiste
+      setProjects((prev) => [...prev, proj]);
+      setShowForm(false);
+    } catch {
+      alert("Erreur lors de la création du projet");
+    }
+  };
 
-  /* Charge les projets une fois connecté */
-  useEffect(() => {
-    if (!token) return;
-    const ctl = new AbortController();
-
-    apiFetch("/api/projects", ctl.signal)
-      .then(setProjects)
-      .catch(() => console.error("Impossible de charger les projets"))
-      .finally(() => setLoadingProj(false));
-
-    return () => ctl.abort();
-  }, [token]);
-
-  /* --------------------- Tâches --------------------- */
-  // Hook personnalisé : polling 3 s
+  /* ---------- Tâches ---------- */
   const { tasks, loading: loadingTasks } = useTasks(token);
 
-  /* Crée une tâche manuellement (bouton +) */
   const handleNewTask = async () => {
     try {
-      await createTask(token); // le polling détecte la nouvelle tâche
-    } catch (err) {
+      await createTask(token);
+    } catch {
       alert("Erreur lors de la création de tâche");
     }
   };
 
-  /* ---------------------- UI ------------------------ */
+  /* ---------- UI ---------- */
   return (
-    <div className="p-8 space-y-6">
-      <h1 className="text-3xl font-bold">Dashboard</h1>
+    <div className="p-8">
+      {/* barre du haut */}
+      <NavBar />
 
-      {/* ----------- Projets ----------- */}
-      <section>
-        <h2 className="text-xl font-semibold mb-2">Projets</h2>
-        {loadingProj ? (
+      {/* --- Projets --- */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Projets</h2>
+          <button className="btn" onClick={() => setShowForm(!showForm)}>
+            + Nouveau projet
+          </button>
+        </div>
+
+        {showForm && (
+          <NewProjectForm
+            onCreate={handleCreateProject}
+            onCancel={() => setShowForm(false)}
+          />
+        )}
+
+        {loading ? (
           <p className="text-sm text-gray-500">Chargement…</p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             {projects.map((p) => (
-              <ProjectCard key={p._id ?? p.id} {...p} />
+              <ProjectCard key={p.id} {...p} />
             ))}
             {projects.length === 0 && (
-              <p className="text-sm text-gray-500">Aucun projet pour l’instant.</p>
+              <p className="text-sm text-gray-500">
+                Aucun projet pour l’instant.
+              </p>
             )}
           </div>
         )}
       </section>
 
-      {/* ----------- Tâches CI/CD ----------- */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xl font-semibold">Tâches CI/CD</h2>
+      {/* --- Tâches --- */}
+      <section className="mt-10 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Tâches CI/CD</h2>
           <button className="btn" onClick={handleNewTask}>
-            + Nouvelle tâche
+            + Nouvelle tâche
           </button>
         </div>
 

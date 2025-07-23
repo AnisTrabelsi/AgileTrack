@@ -1,7 +1,10 @@
-// main.jsx ----------------------------------------------------------
-// Point d’entrée React : monte l’application dans la div #root
-// et configure le routing + le contexte d’authentification.
-// ------------------------------------------------------------------
+/* src/main.jsx
+   ──────────────────────────────────────────────────────────────────────────
+   Point d’entrée React :
+   • Monte l’application dans la <div id="root"> du index.html
+   • Fournit le contexte d’authentification à tout l’arbre
+   • Configure le routing côté client avec react‑router‑dom
+   ────────────────────────────────────────────────────────────────────────── */
 
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -12,48 +15,59 @@ import {
   Navigate,
 } from "react-router-dom";
 
-// Contexte d’authentification (token, login, logout…)
+/* ---------- Contexte Auth (token, user, login, logout) ------------------ */
 import { AuthProvider, AuthContext } from "./context/AuthContext";
 
-// Pages
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
+/* ---------- Pages ------------------------------------------------------- */
+import Login      from "./pages/Login";
+import Dashboard  from "./pages/Dashboard";
 
-// Styles globaux (Tailwind + overrides perso)
-import "./index.css";
+/* ---------- Styles globaux --------------------------------------------- */
+import "./index.css";          // Tailwind + éventuels overrides
 
-/* ------------------------------------------------------------------
-   Composant <Private>
-   - Si le token existe ➜ affiche les enfants
-   - Sinon ➜ redirige vers /login
--------------------------------------------------------------------*/
-const Private = ({ children }) => {
+
+/* =========================================================================
+   <Private> – Garde de route
+   • Si le token est présent ⇒ rend les enfants (page protégée)
+   • Sinon                      ⇒ redirige vers /login
+   ====================================================================== */
+function Private({ children }) {
   const { token } = React.useContext(AuthContext);
-  return token ? children : <Navigate to="/login" replace />;
-};
+  return token ? children : <Navigate replace to="/login" />;
+}
 
-/* ------------------------------------------------------------------
-   Hydratation de l’app React
-   <AuthProvider>  – expose le contexte auth à tout l’arbre
-   <BrowserRouter> – gère l’historique HTML5
-   <Routes>/<Route>– définit les chemins :
-     • /login  ➜  <Login>
-     • /       ➜  <Dashboard> protégé par <Private>
--------------------------------------------------------------------*/
+
+/* =========================================================================
+   Hydratation :
+   <AuthProvider>  – Expose le contexte Auth à toute l’app
+   <BrowserRouter> – Historique HTML5 (routing « single‑page »)
+   <Routes>        – Déclare les routes :
+       • /login  → <Login>
+       • /       → <Dashboard>                 (protégé)
+       • *       → redirige vers /             (catch‑all 404)
+   ====================================================================== */
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <AuthProvider>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          path="/"
-          element={
-            <Private>
-              <Dashboard />
-            </Private>
-          }
-        />
-      </Routes>
-    </BrowserRouter>
-  </AuthProvider>
+  <React.StrictMode>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* ---------- Page de connexion (publique) ---------- */}
+          <Route path="/login" element={<Login />} />
+
+          {/* ---------- Tableau de bord (privé) --------------- */}
+          <Route
+            path="/"
+            element={
+              <Private>
+                <Dashboard />
+              </Private>
+            }
+          />
+
+          {/* ---------- Catch‑all : toute autre URL = / ------- */}
+          <Route path="*" element={<Navigate replace to="/" />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  </React.StrictMode>
 );

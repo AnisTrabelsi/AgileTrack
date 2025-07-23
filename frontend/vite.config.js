@@ -23,7 +23,7 @@ export default defineConfig({
       },
 
       // Projects Service (FastAPI)
-      "/api/projects": {
+      "^/api/projects(/|$)": {
         target: "http://localhost:8001",
         changeOrigin: true,
       },

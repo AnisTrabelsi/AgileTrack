@@ -1,47 +1,81 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+# projects-service/main.py
+from fastapi import FastAPI, Depends, HTTPException, status, APIRouter
 from fastapi.security import OAuth2PasswordBearer
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
-import jwt, os
+import jwt, os, bson
 
-app = FastAPI(title="Projects‑Service")
-
-# 🔗 Connexion à la base de données MongoDB
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://projects-db:27017")
-client = AsyncIOMotorClient(MONGO_URL)
-db = client["devopstrack"]
-projects_col = db["projects"]
-
-# 🔐 Authentification via JWT
+# --------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------
+MONGO_URL  = os.getenv("MONGO_URL",  "mongodb://projects-db:27017")
 SECRET_KEY = os.getenv("JWT_SECRET", "super-secret-dev-key")
-oauth2 = OAuth2PasswordBearer(tokenUrl="token")  # requis par Depends, même si /token n’est pas encore implémenté
+DB_NAME    = os.getenv("MONGO_DB",   "devopstrack")
+COLL_NAME  = "projects"
 
-def verify_jwt(token: str = Depends(oauth2)):
+# --------------------------------------------------------------------
+# FastAPI & MongoDB
+# --------------------------------------------------------------------
+app    = FastAPI(title="Projects‑Service")
+router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+client        = AsyncIOMotorClient(MONGO_URL)
+projects_col  = client[DB_NAME][COLL_NAME]
+
+def mongo_to_dict(doc: dict) -> dict:
+    """Convertit le document Mongo → dict JSON‐able."""
+    d = dict(doc)
+    d["id"] = str(d.pop("_id"))
+    return d
+
+# --------------------------------------------------------------------
+# Authentification JWT
+# --------------------------------------------------------------------
+oauth2 = OAuth2PasswordBearer(tokenUrl="token")          # /token non exposé ici
+
+async def current_user(token: str = Depends(oauth2)) -> dict:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return payload
+        return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
     except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalide"
+            detail="Token invalide",
         )
 
-# 🧱 Schéma de données du projet
+# --------------------------------------------------------------------
+# Schémas Pydantic
+# --------------------------------------------------------------------
 class Project(BaseModel):
-    id: str | None = Field(alias="id", default=None)
+    id:   str | None = Field(default=None)
     name: str
-    repo: str
-    env: str = "dev"
+    repo: str | None = None
+    env:  str = "dev"
 
-# 📦 Endpoints
-@app.get("/projects", response_model=list[Project])
-async def list_projects(_: dict = Depends(verify_jwt)):
-    docs = await projects_col.find().to_list(100)
-    return docs
+class ProjectCreate(BaseModel):
+    name: str
+    repo: str | None = None
+    env:  str = "dev"
 
-@app.post("/projects", response_model=Project, status_code=201)
-async def create_project(p: Project, _: dict = Depends(verify_jwt)):
-    doc = p.model_dump(by_alias=True, exclude={"id"})
-    res = await projects_col.insert_one(doc)
-    doc["id"] = str(res.inserted_id)
+# --------------------------------------------------------------------
+# End‑points
+# --------------------------------------------------------------------
+@router.get("", response_model=list[Project])
+async def list_projects(_: dict = Depends(current_user)):
+    docs = await projects_col.find().to_list(200)
+    return [mongo_to_dict(d) for d in docs]
+
+@router.post("", response_model=Project, status_code=201)
+async def create_project(p: ProjectCreate, _: dict = Depends(current_user)):
+    inserted = await projects_col.insert_one(p.model_dump())
+    doc = p.model_dump()
+    doc["id"] = str(inserted.inserted_id)
     return doc
+
+# --------------------------------------------------------------------
+# Register router & health check
+# --------------------------------------------------------------------
+app.include_router(router)
+
+@app.get("/health", tags=["health"])
+async def health():
+    return {"status": "ok"}

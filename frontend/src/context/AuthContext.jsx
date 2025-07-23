@@ -1,51 +1,75 @@
-// AuthContext.jsx
-// --------------------------------------------------------------
-// Contexte d’authentification global : fournit le JWT et l’utilisateur
-// aux composants React via le Context API.
-// --------------------------------------------------------------
+// src/context/AuthContext.jsx
+// ───────────────────────────────────────────────────────────────
+// Contexte d’authentification global : met à disposition
+//   • token   – JWT Bearer
+//   • user    – profil (facultatif)
+//   • login   – stocke le token
+//   • logout  – efface tout
+// ───────────────────────────────────────────────────────────────
 
 import { createContext, useState, useEffect } from "react";
 
-// Création du contexte (exporté pour être consommé via useContext)
-export const AuthContext = createContext();
+/* -----------------------------------------------------------
+   Création du contexte
+----------------------------------------------------------- */
+export const AuthContext = createContext(null);
 
-// Provider : englobe <App /> dans main.jsx pour donner
-// accès à `token`, `user`, `login`, `logout`.
+/* -----------------------------------------------------------
+   Provider : englobe toute l’app (main.jsx)
+----------------------------------------------------------- */
 export function AuthProvider({ children }) {
-  // Récupère le token persisté dans localStorage au premier rendu
+  /* ---------- États ---------- */
+  // 1) JWT persistant
   const [token, setToken] = useState(() => localStorage.getItem("jwt"));
-  // Le profil utilisateur (sera rempli après appel /me)
-  const [user, setUser] = useState(null);
+  // 2) Profil utilisateur (optionnel)
+  const [user , setUser ] = useState(null);
 
-  /* -----------------------------------------------------------
-     Fonctions de mutateur
-  ----------------------------------------------------------- */
-
-  // Stocke le JWT en localStorage et dans le state React
+  /* ---------- Actions ---------- */
+  /** Connexion : enregistre le JWT et le met en mémoire. */
   const login = (jwt) => {
     localStorage.setItem("jwt", jwt);
     setToken(jwt);
   };
 
-  // Supprime le JWT et réinitialise le contexte
+  /** Déconnexion : vide le stockage + réinitialise le contexte. */
   const logout = () => {
     localStorage.removeItem("jwt");
     setToken(null);
     setUser(null);
   };
 
-  /* -----------------------------------------------------------
-     Effet : si `token` change -> charger /me pour récupérer
-     les infos utilisateur (non implémenté ici)
-  ----------------------------------------------------------- */
+  /* ---------- Effet : charge /me quand le token change ---------- */
   useEffect(() => {
-    if (!token) return;      // pas connecté
-    // TODO : fetch("/api/auth/me") puis setUser(response.data)
+    if (!token) return;                        // pas connecté -> rien à faire
+
+    const controller = new AbortController();
+
+    fetch("/api/auth/me", {
+      signal : controller.signal,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        // Token expiré → on force le logout
+        if (res.status === 401) return logout();
+        // Route non encore implémentée → on ignore (pas de console.error)
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((profil) => {
+        if (profil) setUser(profil);
+      })
+      .catch((err) => {
+        // On ignore les cancellations ; on log les vraies erreurs
+        if (err.name !== "AbortError") {
+          console.error("Erreur /api/auth/me :", err);
+        }
+      });
+
+    return () => controller.abort();           // nettoyage si unmount
   }, [token]);
 
-  /* -----------------------------------------------------------
-     Rendu : expose les valeurs via <AuthContext.Provider>
-  ----------------------------------------------------------- */
+  /* ---------- Exposition du contexte ---------- */
   return (
     <AuthContext.Provider value={{ token, user, login, logout }}>
       {children}

@@ -82,3 +82,6 @@ button:focus-visible {
 .input { @apply border border-gray-300 rounded p-2 w-full; }
 .btn   { @apply bg-blue-600 text-white p-2 rounded hover:bg-blue-700; }
 .card  { @apply bg-white p-6 rounded shadow; }
+.btn {
+  @apply px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700;
+}
