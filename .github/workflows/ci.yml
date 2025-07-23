@@ -1,0 +1,129 @@
+name: CI – DevOpsTrack (Sonar + Docker → Nexus)
+
+###############################################################################
+# 🔔 Déclencheurs
+###############################################################################
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+###############################################################################
+# 🌐 Variables globales (facilement réutilisables)
+###############################################################################
+env:
+  REGISTRY: localhost:8083          # ← adapte si besoin
+  ORG: devopstrack                          # chemin de repo dans Nexus
+  # dossier Dockerfile de chaque micro‑service
+  SERVICE_PATHS: |
+    auth-service
+    projects-service
+    tasks-service
+    metrics-service
+
+###############################################################################
+# 🏗️ Job 1 : Build & Tests + SonarQube (qualité)
+###############################################################################
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+    # ──────────────────────────────────────────────────────────────────────────
+    # 1. Checkout code
+    # ──────────────────────────────────────────────────────────────────────────
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0            # SonarQube préfère l’historique complet
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 2. Setup languages / run unit tests
+    # ──────────────────────────────────────────────────────────────────────────
+    # 👉 Ajoute d’autres jobs (Python, Go…) si tu as des tests
+    - name: Setup Node (tasks‑service frontend)
+      uses: actions/setup-node@v4
+      with: { node-version: 20 }
+
+    - name: Install front deps
+      run: |
+        cd frontend
+        npm ci
+    - name: Lint + tests (front)         # adapte à tes scripts
+      run: |
+        cd frontend
+        npm test --if-present
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 3. Analyse SonarQube
+    # ──────────────────────────────────────────────────────────────────────────
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v2
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: http://sonarqube:9000         # ⚠️ ou https://sonar.example.com
+      with:
+        projectBaseDir: .
+
+###############################################################################
+# 📦 Job 2 : Build & Push images (dépend du job qualité)
+###############################################################################
+  docker-build-push:
+    needs: quality
+    if: success()        # push uniquement si la qualité est OK
+    runs-on: ubuntu-latest
+
+    # -----------------------------------------------------------
+    # Stratégie de matrice : build chaque service indépendamment
+    # -----------------------------------------------------------
+    strategy:
+      matrix:
+        service: [ auth-service, projects-service, tasks-service, metrics-service ]
+
+    steps:
+    # ────────────────────────────────────────────────────────────
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # ────────────────────────────────────────────────────────────
+    # 1. Enable Buildx + QEMU (multi‑arch, cache)
+    # ────────────────────────────────────────────────────────────
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with: { platforms: linux/amd64 }
+
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v3
+
+    # ────────────────────────────────────────────────────────────
+    # 2. Login to Nexus registry
+    # ────────────────────────────────────────────────────────────
+    - name: Login to Nexus
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.NEXUS_USER }}
+        password: ${{ secrets.NEXUS_PWD }}
+
+    # ────────────────────────────────────────────────────────────
+    # 3. Build + Push
+    # ────────────────────────────────────────────────────────────
+    - name: Build & Push ${{ matrix.service }}
+      uses: docker/build-push-action@v5
+      with:
+        push: true
+        context: ./${{ matrix.service }}
+        file: ./${{ matrix.service }}/Dockerfile
+        platforms: linux/amd64       # ajoute arm64 si besoin
+        # Tags : commit SHA + branche latest
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
+          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
+        # Cache (optionnel)
+        cache-from: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
+
+###############################################################################
+# ✔️ Fin du workflow
+###############################################################################
