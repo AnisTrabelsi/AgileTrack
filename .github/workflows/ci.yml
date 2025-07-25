@@ -10,7 +10,7 @@ env:
   ORG: devopstrack
 
 ###############################################################################
-# 1. Tests + analyse SonarQube
+# 1 ▸ Tests + analyse SonarQube
 ###############################################################################
 jobs:
   quality:
@@ -39,7 +39,7 @@ jobs:
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms1g -Xmx2g"
         ports:
-          - "9000:9000"
+          - '9000:9000'
         options: >-
           --shm-size 2g
           --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
@@ -48,23 +48,19 @@ jobs:
           --health-retries=60
 
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
 
-      - name: Install frontend dependencies
-        run: cd frontend && npm ci
+      - name: Install + tests (front)
+        run: |
+          cd frontend
+          npm ci
+          npm test --if-present
 
-      - name: Run frontend tests
-        run: cd frontend && npm test --if-present
-
-      - name: Wait for Sonar & create token/project
+      - name: Wait Sonar, create token / project
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
@@ -74,7 +70,7 @@ jobs:
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
 
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" \
-            http://localhost:9000/api/user_tokens/generate | jq -r .token)
+                  http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
           curl -s -u "$TOKEN": -X POST \
@@ -93,7 +89,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 2. Build & Push images Docker vers Nexus
+# 2 ▸ Build & Push images Docker vers Nexus
 ###############################################################################
   docker-build-push:
     needs: quality
@@ -105,18 +101,19 @@ jobs:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      # Autoriser l’insecure‑registry puis redémarrer Docker avant Nexus
-      - name: Configure Docker daemon (insecure registry)
-        run: |
+      # ────────────────────────────────────────────────────────────────────
+      # 0 ▸ Autoriser l'insecure‑registry
+      # ────────────────────────────────────────────────────────────────────
+      - run: |
           echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      # Démarrer Nexus, créer docker‑hosted, attendre /v2/ et handler blobs
+      # ────────────────────────────────────────────────────────────────────
+      # 1 ▸ Démarrer Nexus, créer docker‑hosted, attendre /v2/
+      # ────────────────────────────────────────────────────────────────────
       - name: Start Nexus & prepare registry
         run: |
           docker pull sonatype/nexus3:3.70.0
@@ -129,13 +126,11 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
 
-          # ⏳ attendre boot complet
           for i in {1..60}; do
             docker logs nexus | grep -q "Started Sonatype Nexus" && break
             echo "Nexus boot ($i/60)"; sleep 10
           done || { docker logs --tail 200 nexus; exit 1; }
 
-          # créer le repository docker‑hosted
           cat > body.json <<'EOF'
           {
             "name": "docker-hosted",
@@ -156,7 +151,7 @@ jobs:
             -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
             -d @body.json || true
 
-          # attendre que /v2/ réponde
+          # attendre /v2/
           for i in {1..40}; do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/v2/ || true)
             echo "/v2/ -> $code ($i/40)"
@@ -167,7 +162,7 @@ jobs:
             echo "8083 toujours indisponible"; docker logs --tail 200 nexus; exit 1
           fi
 
-          # HEAD sur un blob factice : handler docker‑registry prêt
+          # HEAD sur un blob factice
           for i in {1..20}; do
             hcode=$(curl -s -I -o /dev/null -w '%{http_code}' \
               http://localhost:8083/v2/devopstrack/test/blobs/sha256:deadbeef || true)
@@ -177,28 +172,36 @@ jobs:
           done
           [[ $hcode == 401 || $hcode == 404 ]] || { echo "handler pas prêt"; exit 1; }
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/amd64
+      # ────────────────────────────────────────────────────────────────────
+      # 2 ▸ Tooling Docker
+      # ────────────────────────────────────────────────────────────────────
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: linux/amd64 }
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to Nexus Registry
-        uses: docker/login-action@v3
+      # ────────────────────────────────────────────────────────────────────
+      # 3 ▸ Login registry
+      # ────────────────────────────────────────────────────────────────────
+      - uses: docker/login-action@v3
         with:
           registry: localhost:8083
           username: admin
           password: admin123
 
-      - name: Build & Push Docker image
-        uses: docker/build-push-action@v5
+      # ────────────────────────────────────────────────────────────────────
+      # 4 ▸ Build & push image
+      #    • BuildKit mono‑thread pour éviter l’OOM
+      # ────────────────────────────────────────────────────────────────────
+      - uses: docker/build-push-action@v5
+        env:
+          BUILDKIT_MAX_PARALLELISM: '1'
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false        # pas d’attestation → moins de RAM
           tags: |
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:latest
