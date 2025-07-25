@@ -92,9 +92,9 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
-###############################################################################
+##############################################################################
 # 📦 Job 2 : Build & Push des images Docker sur Nexus (si qualité OK)
-###############################################################################
+##############################################################################
   docker-build-push:
     needs: quality
     runs-on: ubuntu-latest
