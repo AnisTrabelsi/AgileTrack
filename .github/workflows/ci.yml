@@ -48,6 +48,8 @@ jobs:
       - run: cd frontend && npm ci
       - run: cd frontend && npm test --if-present
       - run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install --no-install-recommends jq curl
           until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
             sleep 10
           done
@@ -84,17 +86,26 @@ jobs:
             -e INSTALL4J_ADD_VM_PARAMS="-Xms512m -Xmx512m" \
             -e NEXUS_SECURITY_RANDOMPASSWORD=false \
             sonatype/nexus3:3.70.0
-          sudo apt-get -yq install --no-install-recommends jq curl netcat-openbsd
+
+          sudo apt-get -qq update
+          sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
+
           for i in {1..45}; do
-            state=$(curl -sf http://localhost:8081/service/rest/v1/status | jq -r .state || true)
-            [ "$state" = "STARTED" ] && break
+            state=$(curl -s http://localhost:8081/service/rest/v1/status | jq -r .state || true)
+            echo "Nexus state: $state (try $i/45)"
+            if [ "$state" = "STARTED" ]; then break; fi
             sleep 20
           done
-          [ "$state" != "STARTED" ] && exit 1
+          if [ "$state" != "STARTED" ]; then echo "Nexus failed to start"; exit 1; fi
+
           payload='{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\"docker-hosted\",\"http\",8083,null)"}'
           curl -s -u admin:admin123 -H "Content-Type: application/json" -d "$payload" -X POST http://localhost:8081/service/rest/v1/script || true
           curl -s -u admin:admin123 -X POST http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
-          until nc -z localhost 8083; do sleep 5; done
+
+          until nc -z localhost 8083; do
+            echo "Waiting listener 8083…"
+            sleep 5
+          done
 
       - uses: docker/setup-qemu-action@v3
         with: { platforms: linux/amd64 }
