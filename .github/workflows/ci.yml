@@ -90,7 +90,6 @@ jobs:
           args: >
             -Dsonar.projectKey=my-service
             -Dsonar.sources=.
-            -Dsonar.login= ${{ secrets.SONAR_TOKEN }}
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ##############################################################################
