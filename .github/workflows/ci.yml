@@ -5,13 +5,13 @@ name: CI – DevOpsTrack
 
 on:
   push:
-    branches: [ master ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ master ]
+    branches: [ "master" ]
 
 env:
-  ORG: devopstrack
-  REGISTRY: 127.0.0.1:8083   # éviter l’IPv6 ::1
+  ORG:       devopstrack
+  REGISTRY:  127.0.0.1:8083      # IPv4 only pour éviter ::1
 
 ###############################################################################
 # 1. Tests + analyse SonarQube
@@ -22,7 +22,6 @@ jobs:
     timeout-minutes: 40
 
     services:
-      # ---------- Postgres pour Sonar ---------------------------------------
       pg:
         image: postgres:15-alpine
         env:
@@ -31,11 +30,8 @@ jobs:
           POSTGRES_DB:       sonar
         options: >-
           --health-cmd="pg_isready -U sonar -d sonar"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+          --health-interval=10s --health-timeout=5s --health-retries=5
 
-      # ---------- SonarQube --------------------------------------------------
       sonarqube:
         image: sonarqube:10.5-community
         env:
@@ -44,49 +40,55 @@ jobs:
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS:        "-Xms1g -Xmx2g"
-        ports: [ "9000:9000" ]
-        # health‑check minimal : évite l’erreur “no entry for key Health”
+        ports:
+          - "9000:9000"
         options: >-
           --shm-size 2g
-          --health-cmd="curl -sf http://localhost:9000/api/system/status || exit 1"
-          --health-interval=10s
-          --health-timeout=10s
-          --health-retries=60
+          --health-cmd="grep -q 'SonarQube is up' /opt/sonarqube/logs/sonar.log"
+          --health-interval=10s --health-timeout=10s --health-retries=60
 
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm test --if-present
+      - name: Install frontend deps
+        run: cd frontend && npm ci
 
-      - name: Init SonarQube (token + projet)
+      - name: Run frontend tests
+        run: cd frontend && npm test --if-present
+
+      - name: Init Sonar (token + project)
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
 
           echo "⏳  Waiting Sonar UP…"
-          until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
+          until curl -sf http://localhost:9000/api/system/status | jq -e '.status=="UP"'; do
             sleep 5
           done
 
           curl -s -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
 
-          TOKEN=$(curl -s -u admin:StrongPa55! -d "name=ci" \
+          SONAR_TOKEN=$(curl -s -u admin:StrongPa55! -d "name=ci" \
             http://localhost:9000/api/user_tokens/generate | jq -r .token)
-          echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-          curl -s -u "$TOKEN": -X POST \
+          echo "SONAR_TOKEN=$SONAR_TOKEN" >> "$GITHUB_ENV"
+
+          curl -s -u "$SONAR_TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" || true
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5.3.0
         env:
-          SONAR_TOKEN:   ${{ env.SONAR_TOKEN }}
+          SONAR_TOKEN:    ${{ env.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
         with:
           projectBaseDir: .
@@ -103,38 +105,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    # ------------------------ Nexus comme "service" --------------------------
     services:
       nexus:
         image: sonatype/nexus3:3.70.0
-        ports: [ "8081:8081", "8083:8083" ]
         env:
           INSTALL4J_ADD_VM_PARAMS: "-Xms2g -Xmx3g"
           NEXUS_SECURITY_RANDOMPASSWORD: "false"
-        options: >-
-          --health-cmd="curl -sf http://localhost:8081/service/rest/v1/status ||
-                        exit 1"
-          --health-interval=10s
-          --health-timeout=10s
-          --health-retries=60
-    # ------------------------------------------------------------------------
+        ports:
+          - "8081:8081"
+          - "8083:8083"
 
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configure Docker daemon (insecure registry)
+      # 0️⃣  Autoriser l’insecure‑registry et redémarrer Docker
+      - name: Configure Docker daemon
         run: |
-          echo '{ "insecure-registries": ["${{ env.REGISTRY }}"] }' | \
-            sudo tee /etc/docker/daemon.json
+          echo '{ "insecure-registries": ["${{ env.REGISTRY }}"] }' \
+            | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Wait Nexus & create docker-hosted
+      # 1️⃣  Attendre Nexus & créer le repo docker‑hosted
+      - name: Wait Nexus & prepare registry
+        env:
+          NEXUS_ID: ${{ job.services.nexus.id }}
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
 
-          echo "✅  Nexus is healthy, configuring repository…"
+          echo "⏳  Waiting Nexus bootstrap…"
+          until docker logs "$NEXUS_ID" 2>&1 | grep -q "Started Sonatype Nexus"; do
+            sleep 10
+          done
+
           cat > body.json <<'JSON'
           {
             "name": "docker-hosted",
@@ -152,28 +158,33 @@ jobs:
           }
           JSON
 
-          curl -s -u admin:admin123 -H "Content-Type: application/json" \
+          curl -s -u admin:admin123 -H 'Content-Type: application/json' \
                -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
                -d @body.json || true
 
-      # ---------- Buildx -----------------------------------------------------
+          echo "⏳  Waiting registry /v2/…"
+          until curl -sf http://$REGISTRY/v2/ >/dev/null; do sleep 5; done
+          echo "✅  Registry ready."
+
+      # 2️⃣  Préparation buildx
       - uses: docker/setup-qemu-action@v3
-        with: { platforms: linux/amd64 }
+        with:
+          platforms: linux/amd64
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Login to Nexus
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: admin
           password: admin123
 
-      # ---------- Boucle manuelle plutôt qu’une matrice parallèle ------------
-      - name: Build & push all services
+      # 3️⃣  Build & push chaque micro‑service
+      - name: Build & push images
         run: |
           set -e
           for svc in auth-service projects-service tasks-service metrics-service; do
-            echo "🚀  Building $svc …"
             docker buildx build \
               --platform linux/amd64 \
               --push \
