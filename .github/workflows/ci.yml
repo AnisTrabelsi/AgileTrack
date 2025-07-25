@@ -2,9 +2,9 @@ name: CI – DevOpsTrack
 
 on:
   push:
-    branches: [master]
+    branches: [ master ]
   pull_request:
-    branches: [master]
+    branches: [ master ]
 
 env:
   ORG: devopstrack
@@ -64,7 +64,7 @@ jobs:
       - name: Run frontend tests
         run: cd frontend && npm test --if-present
 
-      - name: Wait + setup Sonar token + create project
+      - name: Wait for Sonar & create token/project
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
@@ -75,7 +75,6 @@ jobs:
 
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" \
             http://localhost:9000/api/user_tokens/generate | jq -r .token)
-
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
           curl -s -u "$TOKEN": -X POST \
@@ -103,7 +102,7 @@ jobs:
 
     strategy:
       matrix:
-        service: [auth-service, projects-service, tasks-service, metrics-service]
+        service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
       - name: Checkout sources
@@ -111,32 +110,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Autoriser l’insecure‑registry puis redémarrer Docker avant Nexus
       - name: Configure Docker daemon (insecure registry)
         run: |
           echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Start Nexus & wait for /v2/
+      # Démarrer Nexus, créer docker‑hosted, attendre /v2/ et handler blobs
+      - name: Start Nexus & prepare registry
         run: |
           docker pull sonatype/nexus3:3.70.0
           docker run -d --name nexus \
             -p 8081:8081 -p 8083:8083 \
-            -e INSTALL4J_ADD_VM_PARAMS="-Xms1g -Xmx2g" \
+            -e INSTALL4J_ADD_VM_PARAMS="-Xms2g -Xmx3g" \
             -e NEXUS_SECURITY_RANDOMPASSWORD=false \
             sonatype/nexus3:3.70.0
 
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
 
+          # ⏳ attendre boot complet
           for i in {1..60}; do
-            if docker logs nexus | grep -q "Started Sonatype Nexus"; then
-              echo "Nexus ready ($i/60)"; break; fi
+            docker logs nexus | grep -q "Started Sonatype Nexus" && break
             echo "Nexus boot ($i/60)"; sleep 10
-          done
+          done || { docker logs --tail 200 nexus; exit 1; }
 
-          if ! docker logs nexus | grep -q "Started Sonatype Nexus"; then
-            docker logs --tail 200 nexus; exit 1; fi
-
+          # créer le repository docker‑hosted
           cat > body.json <<'EOF'
           {
             "name": "docker-hosted",
@@ -153,23 +152,30 @@ jobs:
             }
           }
           EOF
-
-          curl -s -u admin:admin123 -H "Content-Type: application/json" \
+          curl -s -u admin:admin123 -H 'Content-Type: application/json' \
             -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
             -d @body.json || true
 
-          for i in {1..30}; do
+          # attendre que /v2/ réponde
+          for i in {1..40}; do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/v2/ || true)
-            echo "Docker /v2/ -> $code ($i/30)"
-            [[ "$code" == "200" || "$code" == "401" ]] && break
+            echo "/v2/ -> $code ($i/40)"
+            [[ $code == 200 || $code == 401 ]] && break
             sleep 5
           done
-
-          if ! [[ "$code" == "200" || "$code" == "401" ]]; then
-            echo "Registry jamais prêt"
-            docker logs --tail 100 nexus
-            exit 1
+          if ! [[ $code == 200 || $code == 401 ]]; then
+            echo "8083 toujours indisponible"; docker logs --tail 200 nexus; exit 1
           fi
+
+          # HEAD sur un blob factice : handler docker‑registry prêt
+          for i in {1..20}; do
+            hcode=$(curl -s -I -o /dev/null -w '%{http_code}' \
+              http://localhost:8083/v2/devopstrack/test/blobs/sha256:deadbeef || true)
+            echo "HEAD blob -> $hcode ($i/20)"
+            [[ $hcode == 401 || $hcode == 404 ]] && break
+            sleep 5
+          done
+          [[ $hcode == 401 || $hcode == 404 ]] || { echo "handler pas prêt"; exit 1; }
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
