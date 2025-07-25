@@ -8,7 +8,7 @@ on:
     branches: [ master ]
 
 env:
-  ORG: devopstrack            # namespace des images poussées
+  ORG: devopstrack
 
 ###############################################################################
 # 🏗️  Job 1 : Qualité – tests + analyse SonarQube
@@ -38,8 +38,7 @@ jobs:
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms512m -Xmx512m"
-        ports:
-          - "9000:9000"
+        ports: [ "9000:9000" ]
         options: >-
           --shm-size 2g
           --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
@@ -88,7 +87,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 📦  Job 2 : Build & Push des images Docker vers Nexus (jetable, sans secrets)
+# 📦  Job 2 : Build & Push vers Nexus (jetable, sans secrets)
 ###############################################################################
   docker-build-push:
     needs: quality
@@ -104,12 +103,13 @@ jobs:
           INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx512m"
           NEXUS_SECURITY_RANDOMPASSWORD: "false"
         options: >-
-          --health-cmd="curl -f http://localhost:8081/"
-          --health-interval=30s
-          --health-retries=10
+          --health-cmd="curl -sf http://localhost:8081/"
+          --health-interval=20s
+          --health-timeout=10s
+          --health-retries=45      # ≈ 15 min
 
     env:
-      REGISTRY: localhost:8083       # registre Docker exposé
+      REGISTRY: localhost:8083
 
     strategy:
       matrix:
@@ -124,32 +124,38 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Allow insecure registry localhost:8083
+      - name: Allow insecure registry
         run: |
           echo '{ "insecure-registries": ["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Configure Nexus docker repo (hosted on 8083)
+      - name: Configure Nexus docker repo (8083)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq curl netcat-openbsd jq
-          until curl -sf http://localhost:8081/service/rest/v1/status > /dev/null; do
-            echo "⏳  Nexus not ready yet…"; sleep 10; done
 
-          JSON_PAYLOAD=$(printf '{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\\u0027docker-hosted\\u0027,\\u0027http\\u0027,8083,null)"}')
+          # 1️⃣ attendre l’état STARTED (max 45 boucles × 20 s ≈ 15 min)
+          for i in {1..45}; do
+            STATE=$(curl -s http://localhost:8081/service/rest/v1/status | jq -r .state || echo "")
+            echo "Nexus state = $STATE"
+            [ "$STATE" = "STARTED" ] && break
+            sleep 20
+          done
+          [ "$STATE" != "STARTED" ] && { echo "❌ Nexus never reached STARTED"; exit 1; }
+
+          # 2️⃣ créer (idempotent) le dépôt docker-hosted sur 8083
+          JSON='{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\"docker-hosted\",\"http\",8083,null)"}'
+          curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" \
+               -d "$JSON" http://localhost:8081/service/rest/v1/script || true
           curl -s -u admin:admin123 -X POST \
-            -H "Content-Type: application/json" \
-            -d "$JSON_PAYLOAD" \
-            http://localhost:8081/service/rest/v1/script || true
+               http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
 
-          curl -s -u admin:admin123 -X POST \
-            http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
-
+          # 3️⃣ attendre l’ouverture du port 8083
           until nc -z localhost 8083; do
-            echo "⏳  Waiting for Docker repo on 8083…"; sleep 5; done
+            echo "⏳  Waiting for listener 8083…"; sleep 5; done
           echo "✅  Docker repo ready on localhost:8083"
 
-      - name: Login to Nexus (admin/admin123)
+      - name: Login to Nexus
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
