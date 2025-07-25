@@ -48,27 +48,24 @@ jobs:
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms512m -Xmx512m"
         ports:
-          - 9000:9000
+          - 9000:9000          # ⇒ accessible sur http://localhost:9000
         options: >-
           --shm-size 2g
-          --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
+          --health-cmd="curl -sf http://localhost:9000/api/system/status \
+                         | grep -q '\"status\":\"UP\"'"
           --health-interval=10s
           --health-timeout=10s
-          --health-retries=60
+          --health-retries=60   # GitHub attendra jusqu’à 10 min max
 
     ###########################################################################
     # 🛠️ Étapes
     ###########################################################################
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
 
       - name: Install frontend dependencies
         run: |
@@ -80,19 +77,12 @@ jobs:
           cd frontend
           npm test --if-present
 
-      - name: Wait for SonarQube to be up
-        run: |
-          echo "Waiting for SonarQube..."
-          until curl -s http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; do
-            sleep 5
-          done
-          echo "SonarQube is ready"
-
+      # ⬇️ plus d'attente explicite : le health‑check suffit
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://sonarqube:9000
+          SONAR_HOST_URL: http://localhost:9000
         with:
           projectBaseDir: .
           args: >
@@ -113,18 +103,13 @@ jobs:
           [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/amd64
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: linux/amd64 }
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
       - name: Login to Nexus Registry
         uses: docker/login-action@v3
