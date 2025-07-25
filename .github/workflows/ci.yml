@@ -70,15 +70,23 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install front deps
+      - name: Install frontend dependencies
         run: |
           cd frontend
           npm ci
 
-      - name: Lint + tests (front)
+      - name: Run frontend tests
         run: |
           cd frontend
           npm test --if-present
+
+      - name: Wait for SonarQube to be up
+        run: |
+          echo "Waiting for SonarQube..."
+          until curl -s http://sonarqube:9000/api/system/status | grep -q '"status":"UP"'; do
+            sleep 5
+          done
+          echo "SonarQube is ready"
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
@@ -92,9 +100,9 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
-##############################################################################
+###############################################################################
 # 📦 Job 2 : Build & Push des images Docker sur Nexus (si qualité OK)
-##############################################################################
+###############################################################################
   docker-build-push:
     needs: quality
     runs-on: ubuntu-latest
