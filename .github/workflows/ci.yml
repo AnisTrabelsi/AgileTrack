@@ -27,25 +27,23 @@ jobs:
     # 🐳 Services Docker disponibles pendant le job
     ###########################################################################
     services:
-      # PostgreSQL pour SonarQube
       pg:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER:     sonar
+          POSTGRES_USER: sonar
           POSTGRES_PASSWORD: sonar
-          POSTGRES_DB:       sonar
+          POSTGRES_DB: sonar
         options: >-
           --health-cmd="pg_isready -U sonar -d sonar"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
-      # SonarQube Community
       sonarqube:
         image: sonarqube:10.5-community
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-          SONAR_JDBC_URL:      jdbc:postgresql://pg:5432/sonar
+          SONAR_JDBC_URL: jdbc:postgresql://pg:5432/sonar
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms512m -Xmx512m"
@@ -65,9 +63,8 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # historique complet → meilleure analyse
+          fetch-depth: 0
 
-      # Exemple build/tests Node (frontend)
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -83,12 +80,11 @@ jobs:
           cd frontend
           npm test --if-present
 
-      # ───────────── Étape Scan SonarQube ─────────────
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://sonarqube:9000  # Utilise le nom du service Docker
+          SONAR_HOST_URL: http://sonarqube:9000
         with:
           projectBaseDir: .
           args: >
@@ -114,7 +110,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # QEMU + Buildx pour cross‑build
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -123,7 +118,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login Nexus
       - name: Login to Nexus Registry
         uses: docker/login-action@v3
         with:
@@ -131,7 +125,6 @@ jobs:
           username: ${{ secrets.NEXUS_USER }}
           password: ${{ secrets.NEXUS_PWD }}
 
-      # Build & Push image
       - name: Build & Push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
