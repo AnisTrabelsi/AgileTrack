@@ -1,33 +1,35 @@
 name: "CI – DevOpsTrack (Sonar + Docker → Nexus)"
 
-###############################################################################
+################################################################################
 # 🔔 Déclencheurs
-###############################################################################
+################################################################################
 on:
   push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
 
-###############################################################################
+################################################################################
 # 🌐 Variables globales
-###############################################################################
+################################################################################
 env:
+  # Adresse de ton registry Nexus (port 8083 défini côté Nexus)
   REGISTRY: localhost:8083
   ORG: devopstrack
 
-###############################################################################
+################################################################################
 # 🏗️ Job 1 : Build / Tests + Analyse SonarQube
-###############################################################################
+################################################################################
 jobs:
   quality:
     runs-on: ubuntu-latest
 
-    ###########################################################################
-    # 🐳 Services Docker pour ce job
-    ###########################################################################
+    # -------------------------------------------------------------------------
+    # 🐳 Services Docker disponibles durant le job
+    # -------------------------------------------------------------------------
     services:
-      # --- PostgreSQL pour SonarQube ----------------------------------------
+
+      # ────────── PostgreSQL pour SonarQube ──────────
       pg:
         image: postgres:15-alpine
         env:
@@ -40,7 +42,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      # --- SonarQube (dépend de pg) ----------------------------------------
+      # ───────────── SonarQube 10.5 ─────────────
       sonarqube:
         image: sonarqube:10.5-community
         env:
@@ -49,48 +51,58 @@ jobs:
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
         ports:
-          - 9000:9000
+          - 9000:9000        # Access : http://localhost:9000
+        # chaîne options SANS commentaire
         options: >-
-          --health-cmd "curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
+          --health-cmd "curl -s http://localhost:9000/api/system/health |
+          grep -q '\"status\":\"UP\"'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 30
-          --shm-size 2g          # ⇦ recommandé, sinon ES peut planter
+          --shm-size 2g
 
     ###########################################################################
     # 🛠️ Étapes
     ###########################################################################
     steps:
-      # 1. Checkout
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+    # 1. Checkout
+    - name: Checkout sources
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      # 2. Exemple build/tests Node (ajuste à ton projet)
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+    # 2. Exemple build/tests Node (adaptable)
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
 
-      - name: Install + tests front
-        run: |
-          cd frontend
-          npm ci
-          npm test --if-present
+    - name: Install front deps
+      run: |
+        cd frontend
+        npm ci
 
-      # 3. Analyse SonarQube
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v2
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://localhost:9000    # service interne
-        with:
-          projectBaseDir: .
-          args: >
-            -Dsonar.projectKey=my-service
-            -Dsonar.sources=.
-            -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
+    - name: Lint + tests (front)
+      run: |
+        cd frontend
+        npm test --if-present
 
-###############################################################################
-# 📦 Job 2 : Build & Push images Docker → Nexus
-###############################################################################
+    # 3. Analyse SonarQube
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v2
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: http://localhost:9000
+      with:
+        projectBaseDir: .
+        args: >
+          -Dsonar.projectKey=my-service
+          -Dsonar.sources=.
+          -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
+
+################################################################################
+# 📦 Job 2 : Build & Push des images Docker sur Nexus (si qualité OK)
+################################################################################
   docker-build-push:
     needs: quality
     if: success()
@@ -101,31 +113,36 @@ jobs:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-      - uses: actions/checkout@v4
+    # 1. Checkout
+    - uses: actions/checkout@v4
 
-      # Buildx + QEMU
-      - uses: docker/setup-qemu-action@v3
-        with: { platforms: linux/amd64 }
-      - uses: docker/setup-buildx-action@v3
+    # 2. Buildx & QEMU
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: linux/amd64
 
-      # Login Nexus
-      - name: Login to Nexus
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.NEXUS_USER }}
-          password: ${{ secrets.NEXUS_PWD }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      # Build & push par service
-      - name: Build & Push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
-          cache-to:   type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
+    # 3. Login à Nexus
+    - name: Login to Nexus Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.NEXUS_USER }}
+        password: ${{ secrets.NEXUS_PWD }}
+
+    # 4. Build & Push
+    - name: Build & Push ${{ matrix.service }}
+      uses: docker/build-push-action@v5
+      with:
+        context: ./${{ matrix.service }}
+        file: ./${{ matrix.service }}/Dockerfile
+        platforms: linux/amd64
+        push: true
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
+          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
+        cache-from: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
+        cache-to:   type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
