@@ -34,7 +34,8 @@ jobs:
           --health-cmd="pg_isready -U sonar -d sonar"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5        # ← commentaire YAML, **hors** du bloc plié
+          --health-retries=5
+
       sonarqube:
         image: sonarqube:10.5-community
         env:
@@ -51,7 +52,6 @@ jobs:
           --health-interval=10s
           --health-timeout=10s
           --health-retries=60
-        # GitHub Actions patientera max 10 min que SonarQube passe à UP
 
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq curl
 
-          # attendre status=UP
           for i in {1..60}; do
             STATUS=$(curl -s http://localhost:9000/api/system/status | jq -r .status)
             echo "SonarQube status = $STATUS"
@@ -80,16 +79,13 @@ jobs:
           done
           [ "$STATUS" != "UP" ] && { echo "SonarQube never reached UP"; exit 1; }
 
-          # changer mot de passe admin
           curl -s -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
 
-          # générer token jetable
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST \
             -d "name=github-ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-          # créer projet si absent
           curl -s -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" \
             | jq .errors || true
