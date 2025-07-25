@@ -1,3 +1,4 @@
+# .github/workflows/ci.yml
 name: CI – DevOpsTrack (Sonar + Docker → Nexus)
 
 on:
@@ -7,7 +8,7 @@ on:
     branches: [ master ]
 
 env:
-  ORG: devopstrack           # namespace de vos images
+  ORG: devopstrack            # namespace des images poussées
 
 ###############################################################################
 # 🏗️  Job 1 : Qualité – tests + analyse SonarQube
@@ -53,7 +54,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 
-      - name: Install frontend dependencies
+      - name: Install frontend deps
         run: cd frontend && npm ci
 
       - name: Run frontend tests
@@ -63,20 +64,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq curl
-
           until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
-            echo "⏳  Waiting for SonarQube…"
-            sleep 10
-          done
-
+            echo "⏳  Waiting for SonarQube…"; sleep 10; done
           curl -s -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
-
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST \
             -d "name=github-ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
-
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-
           curl -s -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" \
             | jq .errors || true
@@ -94,7 +88,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 📦  Job 2 : Build & Push des images Docker sur Nexus (service local jetable)
+# 📦  Job 2 : Build & Push des images Docker vers Nexus (jetable, sans secrets)
 ###############################################################################
   docker-build-push:
     needs: quality
@@ -102,18 +96,20 @@ jobs:
 
     services:
       nexus:
-        image: sonatype/nexus3:latest
-        ports: [ "8083:8083" ]          # registry docker‑group
+        image: sonatype/nexus3:3.70.0
+        ports:
+          - "8081:8081"          # UI / API
+          - "8083:8083"          # registre Docker
         env:
           INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx512m"
+          NEXUS_SECURITY_RANDOMPASSWORD: "false"   # fixe admin/admin123
         options: >-
-          --health-cmd="curl -sf http://localhost:8081/service/rest/v1/status"
-          --health-interval=15s
-          --health-timeout=10s
-          --health-retries=40
+          --health-cmd="curl -f http://localhost:8081/"
+          --health-interval=30s
+          --health-retries=10
 
     env:
-      REGISTRY: nexus:8083              # alias Docker du service
+      REGISTRY: localhost:8083   # registre publié sur le runner (HTTP)
 
     strategy:
       matrix:
@@ -128,17 +124,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Allow insecure registry nexus:8083
+      - name: Allow insecure registry localhost:8083
         run: |
-          echo '{ "insecure-registries": ["nexus:8083"] }' | sudo tee /etc/docker/daemon.json
+          echo '{ "insecure-registries": ["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Login to Nexus
+      - name: Login to Nexus (admin/admin123)
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.NEXUS_USER }}
-          password: ${{ secrets.NEXUS_PWD }}
+          username: admin
+          password: admin123
 
       - name: Build & Push ${{ matrix.service }}
         uses: docker/build-push-action@v5
