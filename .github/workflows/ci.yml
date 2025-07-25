@@ -98,18 +98,18 @@ jobs:
       nexus:
         image: sonatype/nexus3:3.70.0
         ports:
-          - "8081:8081"          # UI / API
-          - "8083:8083"          # registre Docker
+          - "8081:8081"
+          - "8083:8083"
         env:
           INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx512m"
-          NEXUS_SECURITY_RANDOMPASSWORD: "false"   # fixe admin/admin123
+          NEXUS_SECURITY_RANDOMPASSWORD: "false"
         options: >-
           --health-cmd="curl -f http://localhost:8081/"
           --health-interval=30s
           --health-retries=10
 
     env:
-      REGISTRY: localhost:8083   # registre publié sur le runner (HTTP)
+      REGISTRY: localhost:8083       # registre Docker exposé
 
     strategy:
       matrix:
@@ -128,6 +128,26 @@ jobs:
         run: |
           echo '{ "insecure-registries": ["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
+
+      - name: Configure Nexus docker repo (hosted on 8083)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl netcat-openbsd jq
+          until curl -sf http://localhost:8081/service/rest/v1/status > /dev/null; do
+            echo "⏳  Nexus not ready yet…"; sleep 10; done
+
+          JSON_PAYLOAD=$(printf '{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\\u0027docker-hosted\\u0027,\\u0027http\\u0027,8083,null)"}')
+          curl -s -u admin:admin123 -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            http://localhost:8081/service/rest/v1/script || true
+
+          curl -s -u admin:admin123 -X POST \
+            http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
+
+          until nc -z localhost 8083; do
+            echo "⏳  Waiting for Docker repo on 8083…"; sleep 5; done
+          echo "✅  Docker repo ready on localhost:8083"
 
       - name: Login to Nexus (admin/admin123)
         uses: docker/login-action@v3
