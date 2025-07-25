@@ -13,8 +13,7 @@ on:
 # 🌐 Variables globales
 ###############################################################################
 env:
-  REGISTRY: localhost:8083
-  ORG: devopstrack
+  ORG: devopstrack                 # Namespace de vos images
 
 ###############################################################################
 # 🏗️ Job 1 : Qualité – build + tests + analyse SonarQube
@@ -51,7 +50,7 @@ jobs:
           --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
           --health-interval=10s
           --health-timeout=10s
-          --health-retries=60
+          --health-retries=60   # ~10 min
 
     steps:
       - uses: actions/checkout@v4
@@ -70,22 +69,17 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq curl
-
-          for i in {1..60}; do
-            STATUS=$(curl -s http://localhost:9000/api/system/status | jq -r .status)
-            echo "SonarQube status = $STATUS"
-            [ "$STATUS" = "UP" ] && break
-            sleep 10
-          done
-          [ "$STATUS" != "UP" ] && { echo "SonarQube never reached UP"; exit 1; }
-
+          # attendre SonarQube UP
+          until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
+            echo "⏳ Waiting for SonarQube…"; sleep 10; done
+          # changer mot de passe admin
           curl -s -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
-
+          # générer token jetable
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST \
             -d "name=github-ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-
+          # créer projet au besoin
           curl -s -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" \
             | jq .errors || true
@@ -103,14 +97,32 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 📦 Job 2 : Build & Push des images Docker sur Nexus
+# 📦 Job 2 : Build & Push des images Docker sur Nexus (si qualité OK)
 ###############################################################################
   docker-build-push:
     needs: quality
     runs-on: ubuntu-latest
+
+    # ➜ service Nexus exposé sur "nexus:8083"
+    services:
+      nexus:
+        image: sonatype/nexus3:latest
+        ports:
+          - "8083:8083"
+        options: >-
+          --health-cmd="curl -sf http://localhost:8081/service/rest/v1/status"
+          --health-interval=15s
+          --health-timeout=10s
+          --health-retries=40   # ~10 min
+        env:
+          INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx512m"
+
     strategy:
       matrix:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
+
+    env:
+      REGISTRY: nexus:8083                    # alias Docker du service
 
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +132,13 @@ jobs:
         with: { platforms: linux/amd64 }
 
       - uses: docker/setup-buildx-action@v3
+
+      # autoriser le registre HTTP insecure (si vous ne forcez pas HTTPS)
+      - name: Allow insecure registry nexus:8083
+        run: |
+          echo '{ "insecure-registries": ["nexus:8083"] }' | \
+            sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
 
       - name: Login to Nexus Registry
         uses: docker/login-action@v3
