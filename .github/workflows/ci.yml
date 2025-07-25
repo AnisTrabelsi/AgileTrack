@@ -1,4 +1,3 @@
-# .github/workflows/ci.yml
 name: CI – DevOpsTrack (Sonar + Docker → Nexus)
 
 on:
@@ -10,13 +9,10 @@ on:
 env:
   ORG: devopstrack
 
-###############################################################################
-# 🏗️  Job 1 : Qualité – tests + analyse SonarQube
-###############################################################################
 jobs:
   quality:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 35
     services:
       pg:
         image: postgres:15-alpine
@@ -29,7 +25,6 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
       sonarqube:
         image: sonarqube:10.5-community
         env:
@@ -45,37 +40,24 @@ jobs:
           --health-interval=10s
           --health-timeout=10s
           --health-retries=60
-
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-
-      - name: Install frontend deps
-        run: cd frontend && npm ci
-
-      - name: Run frontend tests
-        run: cd frontend && npm test --if-present
-
-      - name: Bootstrap SonarQube (token + project)
-        run: |
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm test --if-present
+      - run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq curl
           until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
-            echo "⏳  Waiting for SonarQube…"; sleep 10; done
-          curl -s -u admin:admin -X POST \
-            "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
-          TOKEN=$(curl -s -u admin:StrongPa55! -X POST \
-            -d "name=github-ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
+            sleep 10
+          done
+          curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
+          TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          curl -s -u "$TOKEN": -X POST \
-            "http://localhost:9000/api/projects/create?project=my-service&name=my-service" \
-            | jq .errors || true
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5.3.0
+          curl -s -u "$TOKEN": -X POST "http://localhost:9000/api/projects/create?project=my-service&name=my-service" || true
+      - uses: SonarSource/sonarqube-scan-action@v5.3.0
         env:
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
@@ -86,93 +68,56 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
-###############################################################################
-# 📦  Job 2 : Build & Push vers Nexus (jetable, sans secrets)
-###############################################################################
   docker-build-push:
     needs: quality
     runs-on: ubuntu-latest
-
-    services:
-      nexus:
-        image: sonatype/nexus3:3.70.0
-        ports:
-          - "8081:8081"
-          - "8083:8083"
-        env:
-          INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx512m"
-          NEXUS_SECURITY_RANDOMPASSWORD: "false"
-        options: >-
-          --health-cmd="curl -sf http://localhost:8081/"
-          --health-interval=20s
-          --health-timeout=10s
-          --health-retries=45      # ≈ 15 min
-
-    env:
-      REGISTRY: localhost:8083
-
+    timeout-minutes: 45
     strategy:
       matrix:
-        service: [ auth-service, projects-service, tasks-service, metrics-service ]
-
+        service:
+          - auth-service
+          - projects-service
+          - tasks-service
+          - metrics-service
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-
-      - uses: docker/setup-qemu-action@v3
-        with: { platforms: linux/amd64 }
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Allow insecure registry
-        run: |
-          echo '{ "insecure-registries": ["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-
-      - name: Configure Nexus docker repo (8083)
-        run: |
+      - run: docker pull sonatype/nexus3:3.70.0
+      - run: |
+          docker run -d --name nexus -p 8081:8081 -p 8083:8083 \
+            -e INSTALL4J_ADD_VM_PARAMS="-Xms512m -Xmx512m" \
+            -e NEXUS_SECURITY_RANDOMPASSWORD=false \
+            sonatype/nexus3:3.70.0
           sudo apt-get update -qq
-          sudo apt-get install -y -qq curl netcat-openbsd jq
-
-          # 1️⃣ attendre l’état STARTED (max 45 boucles × 20 s ≈ 15 min)
-          for i in {1..45}; do
-            STATE=$(curl -s http://localhost:8081/service/rest/v1/status | jq -r .state || echo "")
-            echo "Nexus state = $STATE"
-            [ "$STATE" = "STARTED" ] && break
+          sudo apt-get install -y -qq jq curl netcat-openbsd
+          for n in {1..45}; do
+            state=$(curl -sf http://localhost:8081/service/rest/v1/status | jq -r .state || true)
+            if [ "$state" = "STARTED" ]; then break; fi
             sleep 20
           done
-          [ "$STATE" != "STARTED" ] && { echo "❌ Nexus never reached STARTED"; exit 1; }
-
-          # 2️⃣ créer (idempotent) le dépôt docker-hosted sur 8083
+          if [ "$state" != "STARTED" ]; then exit 1; fi
           JSON='{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\"docker-hosted\",\"http\",8083,null)"}'
-          curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" \
-               -d "$JSON" http://localhost:8081/service/rest/v1/script || true
-          curl -s -u admin:admin123 -X POST \
-               http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
-
-          # 3️⃣ attendre l’ouverture du port 8083
-          until nc -z localhost 8083; do
-            echo "⏳  Waiting for listener 8083…"; sleep 5; done
-          echo "✅  Docker repo ready on localhost:8083"
-
-      - name: Login to Nexus
-        uses: docker/login-action@v3
+          curl -s -u admin:admin123 -H "Content-Type: application/json" -d "$JSON" -X POST http://localhost:8081/service/rest/v1/script || true
+          curl -s -u admin:admin123 -X POST http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
+          until nc -z localhost 8083; do sleep 5; done
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: linux/amd64 }
+      - uses: docker/setup-buildx-action@v3
+      - run: |
+          echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+      - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: localhost:8083
           username: admin
           password: admin123
-
-      - name: Build & Push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
-          cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
-          cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
+            localhost:8083/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
+            localhost:8083/${{ env.ORG }}/${{ matrix.service }}:latest
+          cache-to: type=inline
