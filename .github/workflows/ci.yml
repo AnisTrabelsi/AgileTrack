@@ -13,8 +13,8 @@ on:
 # 🌐 Variables globales
 ###############################################################################
 env:
-  REGISTRY: localhost:8083        # URL Nexus (port 8083)
-  ORG: devopstrack                # Namespace dans Nexus
+  REGISTRY: localhost:8083
+  ORG: devopstrack
 
 ###############################################################################
 # 🏗️ Job 1 : Build / Tests + Analyse SonarQube
@@ -24,67 +24,76 @@ jobs:
     runs-on: ubuntu-latest
 
     ###########################################################################
-    # 🐳 Services Docker disponibles pendant le job
+    # 🐳 Services Docker pour ce job
     ###########################################################################
     services:
+      # --- PostgreSQL pour SonarQube ----------------------------------------
+      pg:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER:     sonar
+          POSTGRES_PASSWORD: sonar
+          POSTGRES_DB:       sonarqube
+        options: >-
+          --health-cmd "pg_isready -U sonar"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # --- SonarQube (dépend de pg) ----------------------------------------
       sonarqube:
         image: sonarqube:10.5-community
-        ports:
-          - 9000:9000                    # => accessible via http://localhost:9000
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-        # Attendre que SonarQube soit UP (health‑check)
+          SONAR_JDBC_URL:      jdbc:postgresql://pg:5432/sonarqube
+          SONAR_JDBC_USERNAME: sonar
+          SONAR_JDBC_PASSWORD: sonar
+        ports:
+          - 9000:9000
         options: >-
-          --health-cmd="curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=30
+          --health-cmd "curl -s http://localhost:9000/api/system/health | grep -q '\"status\":\"UP\"'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+          --shm-size 2g          # ⇦ recommandé, sinon ES peut planter
 
     ###########################################################################
     # 🛠️ Étapes
     ###########################################################################
     steps:
-    # 1. Checkout
-    - name: Checkout sources
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      # 1. Checkout
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-    # 2. Exemple build/tests Node (ajuste selon tes langages)
-    - name: Set up Node
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
+      # 2. Exemple build/tests Node (ajuste à ton projet)
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
 
-    - name: Install front deps
-      run: |
-        cd frontend
-        npm ci
+      - name: Install + tests front
+        run: |
+          cd frontend
+          npm ci
+          npm test --if-present
 
-    - name: Lint + tests (front)
-      run: |
-        cd frontend
-        npm test --if-present
-
-    # 3. Analyse SonarQube (le service tourne déjà)
-    - name: SonarQube Scan
-      uses: SonarSource/sonarqube-scan-action@v2
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: http://localhost:9000
-      with:
-        projectBaseDir: .
-        # Exemple d’options additionnelles
-        args: >
-          -Dsonar.projectKey=my-service
-          -Dsonar.sources=.
-          -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
+      # 3. Analyse SonarQube
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: http://localhost:9000    # service interne
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.projectKey=my-service
+            -Dsonar.sources=.
+            -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 📦 Job 2 : Build & Push des images Docker sur Nexus
+# 📦 Job 2 : Build & Push images Docker → Nexus
 ###############################################################################
   docker-build-push:
-    needs: quality           # n’exécute que si "quality" = OK
+    needs: quality
+    if: success()
     runs-on: ubuntu-latest
 
     strategy:
@@ -92,37 +101,31 @@ jobs:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-    # 1. Checkout
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # 2. Buildx & QEMU
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: linux/amd64
+      # Buildx + QEMU
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: linux/amd64 }
+      - uses: docker/setup-buildx-action@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      # Login Nexus
+      - name: Login to Nexus
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.NEXUS_USER }}
+          password: ${{ secrets.NEXUS_PWD }}
 
-    # 3. Login au registry Nexus
-    - name: Login to Nexus Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ secrets.NEXUS_USER }}
-        password: ${{ secrets.NEXUS_PWD }}
-
-    # 4. Build & Push
-    - name: Build & Push ${{ matrix.service }}
-      uses: docker/build-push-action@v5
-      with:
-        context: ./${{ matrix.service }}
-        file: ./${{ matrix.service }}/Dockerfile
-        platforms: linux/amd64
-        push: true
-        tags: |
-          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
-          ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
-        # (Option) cache buildx
-        cache-from: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
-        cache-to:   type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
+      # Build & push par service
+      - name: Build & Push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache
+          cache-to:   type=registry,ref=${{ env.REGISTRY }}/cache/${{ matrix.service }}:buildcache,mode=max
