@@ -1,17 +1,31 @@
 name: "CI – DevOpsTrack (Sonar + Docker → Nexus)"
 
+###############################################################################
+# 🔔 Déclencheurs
+###############################################################################
 on:
-  push:        { branches: [ master ] }
-  pull_request:{ branches: [ master ] }
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
+###############################################################################
+# 🌐 Variables globales
+###############################################################################
 env:
-  REGISTRY: localhost:8083
-  ORG: devopstrack
+  REGISTRY: localhost:8083   # URL de votre registry Nexus
+  ORG: devopstrack           # Namespace / organisation
 
+###############################################################################
+# 🏗️ Job 1 : Qualité – build + tests + analyse SonarQube
+###############################################################################
 jobs:
   quality:
     runs-on: ubuntu-latest
 
+    ###########################################################################
+    # 🐳 Services Docker disponibles pendant le job
+    ###########################################################################
     services:
       pg:
         image: postgres:15-alpine
@@ -31,28 +45,46 @@ jobs:
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms512m -Xmx512m"
-        ports: [ "9000:9000" ]
+        ports:
+          - "9000:9000"        # accessible sur http://localhost:9000
         options: >-
           --shm-size 2g
           --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
-          --health-interval=10s --health-timeout=10s --health-retries=60
+          --health-interval=10s
+          --health-timeout=10s
+          --health-retries=60  # GitHub attendra max 10 min que le statut passe à UP
 
+    ###########################################################################
+    # 🛠️ Étapes
+    ###########################################################################
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Install frontend dependencies
-        run: cd frontend && npm ci
+        run: |
+          cd frontend
+          npm ci
 
       - name: Run frontend tests
-        run: cd frontend && npm test --if-present
+        run: |
+          cd frontend
+          npm test --if-present
 
+      # 🔑 Création d’un jeton SonarQube valable pour ce run
       - name: Bootstrap SonarQube (create CI token)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq curl
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq curl
+
+          # 1. Attendre que SonarQube soit UP
           for i in {1..60}; do
             STATUS=$(curl -s http://localhost:9000/api/system/status | jq -r .status)
             echo "SonarQube status = $STATUS"
@@ -60,11 +92,19 @@ jobs:
             sleep 10
           done
           [ "$STATUS" != "UP" ] && { echo "SonarQube never reached UP"; exit 1; }
+
+          # 2. Changer le mot de passe admin (1ʳᵉ connexion)
           curl -s -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
+
+          # 3. Générer un token CI jetable
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST \
             -d "name=github-ci" http://localhost:9000/api/user_tokens/generate | jq -r .token)
+
+          # 4. L’exposer pour la step suivante
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+          # 5. Créer le projet s’il n’existe pas
           curl -s -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" \
             | jq .errors || true
@@ -81,19 +121,26 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
+###############################################################################
+# 📦 Job 2 : Build & Push des images Docker sur Nexus (si qualité OK)
+###############################################################################
   docker-build-push:
     needs: quality
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: docker/setup-qemu-action@v3
-        with: { platforms: linux/amd64 }
+        with:
+          platforms: linux/amd64
 
       - uses: docker/setup-buildx-action@v3
 
