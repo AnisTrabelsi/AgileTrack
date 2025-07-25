@@ -2,15 +2,15 @@ name: CI – DevOpsTrack
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 env:
-  ORG: devopstrack            # namespace Docker
+  ORG: devopstrack  # namespace des images
 
 ###############################################################################
-# 1 ▸ Tests + analyse de code (SonarQube)
+# 1 ▸ Tests + analyse SonarQube
 ###############################################################################
 jobs:
   quality:
@@ -50,37 +50,36 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: cd frontend && npm ci
 
       - name: Run frontend tests
         run: cd frontend && npm test --if-present
 
-      - name: Wait SonarQube & create token/project
+      - name: Wait SonarQube + token
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
+          until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
+            sleep 10
+          done
 
-          # attendre Sonar UP
-          until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do sleep 10; done
-
-          # changer le mot de passe admin
           curl -sf -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
 
-          # générer un token CI
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" \
             http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-          # créer (ou ignorer) le projet
-          curl -sf -u "$TOKEN": -X POST \
+          curl -s -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" || true
 
       - name: SonarQube Scan
@@ -96,7 +95,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 2 ▸ Build & Push des images vers Nexus (local)
+# 2 ▸ Build & Push images Docker vers Nexus
 ###############################################################################
   docker-build-push:
     needs: quality
@@ -105,24 +104,23 @@ jobs:
 
     strategy:
       matrix:
-        service: [ auth-service, projects-service, tasks-service, metrics-service ]
+        service:
+          - auth-service
+          - projects-service
+          - tasks-service
+          - metrics-service
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
-      #######################################################################
-      # A ▸ Préparer Docker daemon pour un registre HTTP local
-      #######################################################################
       - name: Configure Docker daemon (insecure registry)
         run: |
           echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      #######################################################################
-      # B ▸ Démarrer Nexus & garantir disponibilité du registre
-      #######################################################################
       - name: Start Nexus & prepare registry
         run: |
           docker pull sonatype/nexus3:3.70.0
@@ -135,74 +133,65 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
 
-          # attendre le démarrage
           for i in {1..60}; do
             docker logs nexus | grep -q "Started Sonatype Nexus" && break
             echo "Nexus boot ($i/60)"; sleep 10
           done || { docker logs --tail 200 nexus; exit 1; }
 
-          # dépôt docker-hosted (idempotent)
-          curl -sf -u admin:admin123 -H 'Content-Type: application/json' \
-            -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
-            -d @<(cat <<'JSON'
-          {
-            "name": "docker-hosted",
-            "online": true,
-            "storage": {
-              "blobStoreName": "default",
-              "strictContentTypeValidation": true,
-              "writePolicy": "ALLOW"
-            },
-            "docker": {
-              "v1Enabled": false,
-              "forceBasicAuth": true,
-              "httpPort": 8083
+          cat > body.json <<'EOF'
+            {
+              "name": "docker-hosted",
+              "online": true,
+              "storage": {
+                "blobStoreName": "default",
+                "strictContentTypeValidation": true,
+                "writePolicy": "ALLOW"
+              },
+              "docker": {
+                "v1Enabled": false,
+                "forceBasicAuth": true,
+                "httpPort": 8083
+              }
             }
-          }
-           JSON
-          ) || true
+            EOF
 
-          # attendre /v2/
+          curl -sf -u admin:admin123 -H "Content-Type: application/json" \
+            -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
+            -d @body.json || true
+
           for i in {1..40}; do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/v2/ || true)
             echo "/v2/ -> $code ($i/40)"
             [[ $code == 200 || $code == 401 ]] && break
-            # Nexus a‑t‑il crashé ?
-            if ! docker ps --filter "name=nexus" --filter "status=running" | grep -q nexus; then
-              echo "⚠️  Nexus n'est plus en RUNNING"; docker logs --tail 100 nexus; exit 1
-            fi
             sleep 5
           done
           [[ $code == 200 || $code == 401 ]] || { echo "Registry KO"; exit 1; }
 
-      #######################################################################
-      # C ▸ Outillage Buildx + connexion au registre
-      #######################################################################
-      - uses: docker/setup-qemu-action@v3
-        with: { platforms: linux/amd64 }
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Login to Nexus
+      - name: Login to Nexus Registry
         uses: docker/login-action@v3
         with:
           registry: localhost:8083
           username: admin
           password: admin123
 
-      #######################################################################
-      # D ▸ Build & Push pour chaque micro‑service
-      #######################################################################
-      - name: Build & Push image ${{ matrix.service }}
+      - name: Build & Push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         env:
-          BUILDKIT_MAX_PARALLELISM: '1'   # limite mémoire
+          BUILDKIT_MAX_PARALLELISM: '1'
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           platforms: linux/amd64
           push: true
-          provenance: false              # évite de pousser le SLSA attestation
+          provenance: false
           tags: |
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:latest
