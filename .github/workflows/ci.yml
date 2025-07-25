@@ -32,7 +32,7 @@ jobs:
           SONAR_JDBC_URL: jdbc:postgresql://pg:5432/sonar
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
-          ES_JAVA_OPTS: "-Xms1024m -Xmx2048m"
+          ES_JAVA_OPTS: "-Xms1g -Xmx2g"
         ports: [ "9000:9000" ]
         options: >-
           --shm-size 2g
@@ -76,10 +76,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
       - run: docker pull sonatype/nexus3:3.70.0
+
       - run: |
           docker run -d --name nexus -p 8081:8081 -p 8083:8083 \
-            -e INSTALL4J_ADD_VM_PARAMS="-Xms1024m -Xmx2048m" \
+            -e INSTALL4J_ADD_VM_PARAMS="-Xms1g -Xmx2g" \
             -e NEXUS_SECURITY_RANDOMPASSWORD=false \
             sonatype/nexus3:3.70.0
           sudo apt-get -qq update
@@ -95,11 +97,12 @@ jobs:
             fi
             sleep 20
           done
-          if [ "$state" != "STARTED" ]; then docker logs --tail 100 nexus; exit 1; fi
+          if [ "$state" != "STARTED" ]; then docker logs --tail 200 nexus; exit 1; fi
           payload='{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\"docker-hosted\",\"http\",8083,null)"}'
           curl -s -u admin:admin123 -H "Content-Type: application/json" -d "$payload" -X POST http://localhost:8081/service/rest/v1/script || true
           curl -s -u admin:admin123 -X POST http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
           until nc -z localhost 8083; do sleep 5; done
+
       - uses: docker/setup-qemu-action@v3
         with: { platforms: linux/amd64 }
       - uses: docker/setup-buildx-action@v3
