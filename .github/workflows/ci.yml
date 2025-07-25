@@ -87,33 +87,31 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
           for i in {1..60}; do
-            code=$(curl -s -o /tmp/s.json -w '%{http_code}' http://localhost:8081/service/rest/v1/status || true)
-            if [ "$code" = "200" ]; then
-              state=$(jq -r .state /tmp/s.json)
-              echo "state=$state ($i/60)"
-              [ "$state" = "STARTED" ] && break
-            else
-              echo "HTTP=$code ($i/60)"
-            fi
+            state=$(docker exec nexus curl -s http://localhost:8081/service/rest/v1/status | jq -r .state 2>/dev/null || true)
+            echo "state=$state ($i/60)"
+            [ "$state" = "STARTED" ] && break
             sleep 20
           done
-          if [ "$state" != "STARTED" ]; then docker logs --tail 200 nexus; exit 1; fi
+          [ "$state" = "STARTED" ] || { docker logs --tail 200 nexus; exit 1; }
           payload='{"name":"create-docker-hosted","type":"groovy","content":"repository.createDockerHosted(\"docker-hosted\",\"http\",8083,null)"}'
-          curl -s -u admin:admin123 -H "Content-Type: application/json" -d "$payload" -X POST http://localhost:8081/service/rest/v1/script || true
-          curl -s -u admin:admin123 -X POST http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
+          docker exec nexus curl -s -u admin:admin123 -H "Content-Type: application/json" -d "$payload" -X POST http://localhost:8081/service/rest/v1/script || true
+          docker exec nexus curl -s -u admin:admin123 -X POST http://localhost:8081/service/rest/v1/script/create-docker-hosted/run || true
           until nc -z localhost 8083; do sleep 5; done
 
       - uses: docker/setup-qemu-action@v3
         with: { platforms: linux/amd64 }
       - uses: docker/setup-buildx-action@v3
+
       - run: |
           echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
+
       - uses: docker/login-action@v3
         with:
           registry: localhost:8083
           username: admin
           password: admin123
+
       - uses: docker/build-push-action@v5
         with:
           context: ./${{ matrix.service }}
