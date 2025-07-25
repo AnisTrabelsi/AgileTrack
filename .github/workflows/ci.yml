@@ -7,10 +7,10 @@ on:
     branches: [ master ]
 
 env:
-  ORG: devopstrack
+  ORG: devopstrack            # namespace Docker
 
 ###############################################################################
-# 1 ▸ Tests + analyse SonarQube
+# 1 ▸ Tests + analyse de code (SonarQube)
 ###############################################################################
 jobs:
   quality:
@@ -39,7 +39,7 @@ jobs:
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS: "-Xms1g -Xmx2g"
         ports:
-          - '9000:9000'
+          - "9000:9000"
         options: >-
           --shm-size 2g
           --health-cmd="curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"
@@ -48,32 +48,39 @@ jobs:
           --health-retries=60
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout sources
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with: { node-version: 20 }
 
-      - name: Install + tests (front)
-        run: |
-          cd frontend
-          npm ci
-          npm test --if-present
+      - name: Install frontend deps
+        run: cd frontend && npm ci
 
-      - name: Wait Sonar, create token / project
+      - name: Run frontend tests
+        run: cd frontend && npm test --if-present
+
+      - name: Wait SonarQube & create token/project
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl
+
+          # attendre Sonar UP
           until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do sleep 10; done
 
-          curl -s -u admin:admin -X POST \
+          # changer le mot de passe admin
+          curl -sf -u admin:admin -X POST \
             "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
 
+          # générer un token CI
           TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" \
-                  http://localhost:9000/api/user_tokens/generate | jq -r .token)
+            http://localhost:9000/api/user_tokens/generate | jq -r .token)
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-          curl -s -u "$TOKEN": -X POST \
+          # créer (ou ignorer) le projet
+          curl -sf -u "$TOKEN": -X POST \
             "http://localhost:9000/api/projects/create?project=my-service&name=my-service" || true
 
       - name: SonarQube Scan
@@ -89,7 +96,7 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
 
 ###############################################################################
-# 2 ▸ Build & Push images Docker vers Nexus
+# 2 ▸ Build & Push des images vers Nexus (local)
 ###############################################################################
   docker-build-push:
     needs: quality
@@ -101,15 +108,21 @@ jobs:
         service: [ auth-service, projects-service, tasks-service, metrics-service ]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout sources
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      # 0 ▸ Docker daemon : autoriser l’insecure registry
-      - run: |
+      #######################################################################
+      # A ▸ Préparer Docker daemon pour un registre HTTP local
+      #######################################################################
+      - name: Configure Docker daemon (insecure registry)
+        run: |
           echo '{ "insecure-registries":["localhost:8083"] }' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      # 1 ▸ Lancer Nexus + créer le repo docker‑hosted
+      #######################################################################
+      # B ▸ Démarrer Nexus & garantir disponibilité du registre
+      #######################################################################
       - name: Start Nexus & prepare registry
         run: |
           docker pull sonatype/nexus3:3.70.0
@@ -122,63 +135,74 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -qq install --no-install-recommends jq curl netcat-openbsd
 
-          # attendre le boot complet
+          # attendre le démarrage
           for i in {1..60}; do
             docker logs nexus | grep -q "Started Sonatype Nexus" && break
             echo "Nexus boot ($i/60)"; sleep 10
           done || { docker logs --tail 200 nexus; exit 1; }
 
-          # créer le dépôt docker‑hosted (idempotent)
+          # dépôt docker-hosted (idempotent)
           curl -sf -u admin:admin123 -H 'Content-Type: application/json' \
             -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
             -d @<(cat <<'JSON'
           {
-            "name":"docker-hosted",
-            "online":true,
-            "storage":{"blobStoreName":"default","strictContentTypeValidation":true,"writePolicy":"ALLOW"},
-            "docker":{"v1Enabled":false,"forceBasicAuth":true,"httpPort":8083}
+            "name": "docker-hosted",
+            "online": true,
+            "storage": {
+              "blobStoreName": "default",
+              "strictContentTypeValidation": true,
+              "writePolicy": "ALLOW"
+            },
+            "docker": {
+              "v1Enabled": false,
+              "forceBasicAuth": true,
+              "httpPort": 8083
+            }
           }
-       JSON
+           JSON
           ) || true
 
-      # 2 ▸ S’assurer que le registre est encore UP juste avant login
-      - name: Wait for /v2/ (pre‑login)
-        run: |
-          for i in {1..30}; do
+          # attendre /v2/
+          for i in {1..40}; do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8083/v2/ || true)
-            echo "/v2/ -> $code ($i/30)"
-            [[ $code == 200 || $code == 401 ]] && exit 0
-            # le conteneur a‑t‑il crashé ?
+            echo "/v2/ -> $code ($i/40)"
+            [[ $code == 200 || $code == 401 ]] && break
+            # Nexus a‑t‑il crashé ?
             if ! docker ps --filter "name=nexus" --filter "status=running" | grep -q nexus; then
-              echo "⚠️  nexus n'est plus en RUNNING !"; docker logs --tail 100 nexus; exit 1
+              echo "⚠️  Nexus n'est plus en RUNNING"; docker logs --tail 100 nexus; exit 1
             fi
             sleep 5
           done
-          echo "Timeout : registry toujours indisponible"; docker logs --tail 200 nexus; exit 1
+          [[ $code == 200 || $code == 401 ]] || { echo "Registry KO"; exit 1; }
 
-      # 3 ▸ Tooling Docker
+      #######################################################################
+      # C ▸ Outillage Buildx + connexion au registre
+      #######################################################################
       - uses: docker/setup-qemu-action@v3
         with: { platforms: linux/amd64 }
 
       - uses: docker/setup-buildx-action@v3
 
-      # 4 ▸ Login
-      - uses: docker/login-action@v3
+      - name: Login to Nexus
+        uses: docker/login-action@v3
         with:
           registry: localhost:8083
           username: admin
           password: admin123
 
-      # 5 ▸ Build & push (mono‑thread pour éviter l’OOM)
-      - uses: docker/build-push-action@v5
+      #######################################################################
+      # D ▸ Build & Push pour chaque micro‑service
+      #######################################################################
+      - name: Build & Push image ${{ matrix.service }}
+        uses: docker/build-push-action@v5
         env:
-          BUILDKIT_MAX_PARALLELISM: '1'
+          BUILDKIT_MAX_PARALLELISM: '1'   # limite mémoire
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           platforms: linux/amd64
           push: true
-          provenance: false          # réduit l’empreinte mémoire
+          provenance: false              # évite de pousser le SLSA attestation
           tags: |
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
             localhost:8083/${{ env.ORG }}/${{ matrix.service }}:latest
