@@ -1,94 +1,94 @@
 # ------------------------------------------------------------
-# CI – DevOpsTrack
+# CI - DevOpsTrack (SonarCloud + Build & Push Docker)
 # ------------------------------------------------------------
-name: CI – DevOpsTrack
+name: CI - DevOpsTrack
 
 on:
   push:
-    branches: [master]
+    branches: [ main, master ]
   pull_request:
-    branches: [master]
+    branches: [ main, master ]
 
 env:
   ORG: devopstrack
 
-###############################################################################
-# 1. Tests + analyse SonarQube
-###############################################################################
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
+    name: Tests + SonarCloud
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-
-    services:
-      pg:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER:     sonar
-          POSTGRES_PASSWORD: sonar
-          POSTGRES_DB:       sonar
-        options: >-
-          --health-cmd="pg_isready -U sonar -d sonar"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
-      sonarqube:
-        image: sonarqube:10.5-community
-        env:
-          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-          SONAR_JDBC_URL:      jdbc:postgresql://pg:5432/sonar
-          SONAR_JDBC_USERNAME: sonar
-          SONAR_JDBC_PASSWORD: sonar
-          ES_JAVA_OPTS:       "-Xms1g -Xmx2g"
-        ports: [ "9000:9000" ]
-        options: >-
-          --shm-size=2g
-          --health-cmd="bash -c 'curl -sf http://localhost:9000/api/system/status | grep -q \"\\\"status\\\":\\\"UP\\\"\"'"
-          --health-interval=10s
-          --health-timeout=10s
-          --health-retries=120
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
-      - name: Checkout sources
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend deps
-        run: cd frontend && npm ci
+      - name: Install deps (frontend)
+        working-directory: frontend
+        run: npm ci
 
-      - name: Run frontend tests
-        run: cd frontend && npm test --if-present
+      - name: Tests (frontend) + coverage
+        working-directory: frontend
+        run: npm test -- --coverage --if-present
 
-      - name: Create Sonar token & project
-        run: |
-          sudo apt-get -qq update
-          sudo apt-get -qq install -y jq curl
-          until [[ "$(curl -s http://localhost:9000/api/system/status | jq -r .status)" == "UP" ]]; do
-            echo "⏳  Waiting for SonarQube…"; sleep 10
-          done
-          curl -s -u admin:admin -X POST \
-            "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=StrongPa55!"
-          TOKEN=$(curl -s -u admin:StrongPa55! -X POST -d "name=ci" \
-            http://localhost:9000/api/user_tokens/generate | jq -r .token)
-          echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          curl -s -u "$TOKEN": -X POST \
-            "http://localhost:9000/api/projects/create?project=my-service&name=my-service" || true
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5.3.0
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
         env:
-          SONAR_TOKEN:    ${{ env.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://localhost:9000
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}
+
+  docker-build-push:
+    name: Build & Push images
+    needs: quality
+    if: ${{ success() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service: [auth-service, projects-service, tasks-service, metrics-service]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
         with:
-          projectBaseDir: .
-          args: >
-            -Dsonar.projectKey=my-service
-            -Dsonar.sources=.
-            -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
+          platforms: linux/amd64
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 🔐 IMPORTANT :
+      # - Si runner self-hosted et Nexus HTTP (8083) -> OK.
+      # - Si runner GitHub hébergé -> NEXUS_URL DOIT être en HTTPS (proxy devant Nexus).
+      - name: Docker login (Nexus)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.NEXUS_URL }}   # ex: 192.168.1.50:8083 ou registry.domaine.tld
+          username: ${{ secrets.NEXUS_USER }}
+          password: ${{ secrets.NEXUS_PWD }}
+
+      - name: Build & Push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.NEXUS_URL }}/docker-ci/${{ matrix.service }}:${{ github.sha }}
+            ${{ secrets.NEXUS_URL }}/docker-ci/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,17 +1,10 @@
-# deploy/compose.yml
 # ──────────────────────────────────────────────────────────────────────
-#  Déploiement de la stack DevOpsTrack (local / POC)                    #
-#  - Auth, Projects, Tasks, Metrics, Prometheus, Grafana                #
-#  - + Nexus 3 (registry privé)                                         #
-#  - + SonarQube (analyse qualité)                                      #
+#  DevOpsTrack – stack locale (Nexus/SonarQube inclus)
 # ──────────────────────────────────────────────────────────────────────
-# NB : le champ version est inutile en Compose v2, on le garde
-#      pour la lisibilité.
-version: "3.9"
 
-########################################################################
-#                               Services                               #
-########################################################################
+# (facultatif en Compose v2)
+# version: "3.9"
+
 services:
   # ─────────────────── PostgreSQL (Auth) ──────────────────────────────
   auth-db:
@@ -27,11 +20,15 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       retries: 5
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ─────────────────── Django : Auth‑Service ──────────────────────────
+  # === A) DEV : build local
   auth-service:
     build: { context: ../auth-service }
+    # === B) DEPLOIEMENT : utiliser l’image Nexus (décommente la ligne suivante et commente 'build')
+    # image: 127.0.0.1:8083/docker-ci/auth-service:test2
     container_name: auth-service
     environment:
       DJANGO_SECRET_KEY: super-secret-dev-key
@@ -42,6 +39,7 @@ services:
     depends_on:
       auth-db: { condition: service_healthy }
     ports: ["8000:8000"]
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ─────────────────────────── MongoDB ────────────────────────────────
@@ -53,11 +51,13 @@ services:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       retries: 5
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ───────────── FastAPI Projects‑Service (API) ───────────────────────
   projects-service:
     build: { context: ../projects-service }
+    # image: 127.0.0.1:8083/docker-ci/projects-service:test2   # (B)
     container_name: projects-service
     environment:
       MONGO_URL:  mongodb://projects-db:27017
@@ -65,6 +65,7 @@ services:
     depends_on:
       projects-db: { condition: service_healthy }
     ports: ["8001:8001"]
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ─────────────────────────── Redis ──────────────────────────────────
@@ -75,11 +76,13 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 5
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ──────────────── Tasks REST API (Node.js) ──────────────────────────
   tasks-service:
     build: { context: ../tasks-service }
+    # image: 127.0.0.1:8083/docker-ci/tasks-service:test2      # (B)
     container_name: tasks-service
     command: ["node", "src/server.js"]
     environment:
@@ -88,17 +91,20 @@ services:
     depends_on:
       tasks-redis: { condition: service_healthy }
     ports: ["8002:8002"]
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ──────────────── Tasks Worker (background) ─────────────────────────
   tasks-worker:
     build: { context: ../tasks-service }
+    # image: 127.0.0.1:8083/docker-ci/tasks-worker:test2        # (B) si tu externalises aussi le worker
     container_name: tasks-worker
     command: ["node", "src/worker.js"]
     environment:
       REDIS_URL: redis://tasks-redis:6379
     depends_on:
       tasks-redis: { condition: service_healthy }
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ─────────────────────── InfluxDB v2 ────────────────────────────────
@@ -117,11 +123,13 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 10s
       retries: 5
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ───────────── Metrics‑Service (Go + Prometheus) ────────────────────
   metrics-service:
     build: { context: ../metrics-service }
+    # image: 127.0.0.1:8083/docker-ci/metrics-service:test2     # (B)
     container_name: metrics-service
     environment:
       INFLUXDB_URL:    http://metrics-db:8086
@@ -131,6 +139,7 @@ services:
     depends_on:
       metrics-db: { condition: service_healthy }
     ports: ["9100:9100"]    # /metrics
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ───────────────────────── Prometheus ───────────────────────────────
@@ -142,6 +151,7 @@ services:
     depends_on:
       metrics-service: { condition: service_started }
     ports: ["9090:9090"]
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ────────────────────────── Grafana ─────────────────────────────────
@@ -159,6 +169,7 @@ services:
       prometheus: { condition: service_started }
       metrics-db: { condition: service_healthy }
     ports: ["3000:3000"]
+    restart: unless-stopped
     networks: [devopstrack]
 
   # ─────────────────────────── Nexus 3 ────────────────────────────────
@@ -167,14 +178,20 @@ services:
     container_name: nexus
     ports:
       - "8081:8081"   # UI / API
-      - "8083:8083"   # Registry Docker (HTTP/HTTPS – même port)
+      - "8083:8083"   # Registry Docker (HTTP)
     volumes:
       - nexus-data:/nexus-data
-    networks: [devopstrack]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/"]
       interval: 30s
       retries: 10
+    # (optionnel) un peu plus de RAM si tu pousses de grosses images
+    environment:
+      INSTALL4J_ADD_VM_PARAMS: >
+        -Xms1g -Xmx2g -XX:MaxDirectMemorySize=2g
+        -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+    restart: unless-stopped
+    networks: [devopstrack]
 
   # ───────────────────────── SonarQube ────────────────────────────────
   sonarqube:
@@ -188,15 +205,13 @@ services:
       - sonarqube-data:/opt/sonarqube/data
       - sonarqube-logs:/opt/sonarqube/logs
       - sonarqube-extensions:/opt/sonarqube/extensions
-    networks: [devopstrack]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/health"]
       interval: 30s
       retries: 10
+    restart: unless-stopped
+    networks: [devopstrack]
 
-########################################################################
-#                          Réseau & volumes                            #
-########################################################################
 networks:
   devopstrack: {}
 
@@ -205,7 +220,7 @@ volumes:
   projects-data:    {}
   metrics-data:     {}
   grafana-data:     {}
-  nexus-data:       {}   # stockage Nexus (blobs, conf)
+  nexus-data:       {}
   sonarqube-data:   {}
   sonarqube-logs:   {}
   sonarqube-extensions: {}
