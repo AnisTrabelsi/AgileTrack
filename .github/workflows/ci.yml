@@ -9,8 +9,7 @@ on:
   pull_request:
     branches: [ main, master ]
 
-# ⚠️ Assure-toi d'avoir désactivé "Automatic Analysis" dans SonarCloud.
-#   (Project Settings ▸ Analysis Method ▸ Manual / CI)
+# ⚠️ Désactive "Automatic Analysis" dans SonarCloud (Project Settings ▸ Analysis Method).
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -80,17 +79,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ⇩⇩ Met l'owner en minuscules (GHCR exige les chemins en lowercase)
+      - name: Compute lowercase owner
+        shell: bash
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
       - name: Build & Push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           push: true
-          # ⇩⇩ IMPORTANT : tags en minuscules (GHCR l'exige)
           tags: |
-            ${{ toLower(format('ghcr.io/{0}/{1}:{2}', github.repository_owner, matrix.service, github.sha)) }}
-            ${{ toLower(format('ghcr.io/{0}/{1}:latest', github.repository_owner, matrix.service)) }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
- 
