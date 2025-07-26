@@ -21,7 +21,7 @@ services:
   # ─────────────────── Django : Auth‑Service ──────────────────────────
   auth-service:
     build: { context: ../auth-service }
-    # image: 127.0.0.1:8083/docker-ci/auth-service:test2
+    # image: 127.0.0.1:8083/docker-ci/auth-service:test2   # pour consommer depuis Nexus local
     container_name: auth-service
     environment:
       DJANGO_SECRET_KEY: super-secret-dev-key
@@ -171,13 +171,17 @@ services:
     container_name: nexus
     ports:
       - "8081:8081"   # UI / API
-      - "8083:8083"   # Registry Docker (HTTP)
+      - "8083:8083"   # Docker connector (HTTP)
     volumes:
       - nexus-data:/nexus-data
     environment:
       INSTALL4J_ADD_VM_PARAMS: >
         -Xms1g -Xmx2g -XX:MaxDirectMemorySize=2g
         -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/"]
       interval: 30s
