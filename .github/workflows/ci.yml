@@ -11,7 +11,6 @@ on:
 
 env:
   ORG: devopstrack
-  REGISTRY: nexus:8083   # service « nexus » → nom DNS visible du runner
 
 ###############################################################################
 # 1. Tests + analyse SonarQube
@@ -42,8 +41,7 @@ jobs:
           SONAR_JDBC_USERNAME: sonar
           SONAR_JDBC_PASSWORD: sonar
           ES_JAVA_OPTS:       "-Xms1g -Xmx2g"
-        ports:
-          - "9000:9000"
+        ports: [ "9000:9000" ]
         options: >-
           --shm-size=2g
           --health-cmd="bash -c 'curl -sf http://localhost:9000/api/system/status | grep -q \"\\\"status\\\":\\\"UP\\\"\"'"
@@ -94,91 +92,3 @@ jobs:
             -Dsonar.projectKey=my-service
             -Dsonar.sources=.
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
-
-###############################################################################
-# 2. Build & push Docker images to Nexus
-###############################################################################
-  docker-build-push:
-    needs: quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    services:
-      nexus:
-        image: sonatype/nexus3:3.70.0
-        env:
-          NEXUS_SECURITY_RANDOMPASSWORD: "false"
-          INSTALL4J_ADD_VM_PARAMS: "-Xms1g -Xmx2g"
-        ports:
-          - "8081:8081"
-          - "8083:8083"
-        options: >-
-          --health-cmd="curl -sf http://localhost:8081/service/rest/v1/status |
-                        jq -e '(.state==\"STARTED\")' >/dev/null"
-          --health-interval=10s
-          --health-timeout=10s
-          --health-retries=60
-
-    strategy:
-      matrix:
-        service: [auth-service, projects-service, tasks-service, metrics-service]
-
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Helpers (curl, jq)
-        run: |
-          sudo apt-get -qq update
-          sudo apt-get -qq install -y jq curl
-
-      - name: Create docker-hosted repo
-        run: |
-          cat >repo.json <<'JSON'
-          {
-            "name": "docker-hosted",
-            "online": true,
-            "storage": {
-              "blobStoreName": "default",
-              "strictContentTypeValidation": true,
-              "writePolicy": "ALLOW"
-            },
-            "docker": { "v1Enabled": false, "forceBasicAuth": true, "httpPort": 8083 }
-          }
-          JSON
-          curl -s -u admin:admin123 -H "Content-Type: application/json" \
-               -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
-               -d @repo.json || true
-          for i in {1..30}; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://$REGISTRY/v2/ || true)
-            echo "/v2/ -> $code ($i/30)"; [[ $code == 200 || $code == 401 ]] && break
-            sleep 3
-          done
-          [[ $code == 200 || $code == 401 ]]
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/amd64
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Login to Nexus
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: admin
-          password: admin123
-
-      - name: Build & push ${{ matrix.service }}
-        uses: docker/build-push-action@v5
-        with:
-          context:   ./${{ matrix.service }}
-          file:      ./${{ matrix.service }}/Dockerfile
-          platforms: linux/amd64
-          push:      true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.service }}:latest
-          cache-to: type=inline
