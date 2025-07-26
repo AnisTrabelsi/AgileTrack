@@ -42,9 +42,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Tests (frontend) + coverage
+      # ✅ N'échoue pas s'il n'y a pas de script "test"
+      - name: Tests (frontend) + coverage (si présent)
         working-directory: frontend
-        run: npm test -- --coverage --if-present
+        run: npm run -s test --if-present -- --coverage
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
@@ -71,9 +72,6 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # 🔐 IMPORTANT :
-      # - Si runner self-hosted et Nexus HTTP (8083) -> OK.
-      # - Si runner GitHub hébergé -> NEXUS_URL DOIT être en HTTPS (proxy devant Nexus).
       - name: Docker login (Nexus)
         uses: docker/login-action@v3
         with:

@@ -1,9 +1,4 @@
-# ──────────────────────────────────────────────────────────────────────
-#  DevOpsTrack – stack locale (Nexus/SonarQube inclus)
-# ──────────────────────────────────────────────────────────────────────
-
-# (facultatif en Compose v2)
-# version: "3.9"
+# DevOpsTrack – stack locale (Nexus + SonarQube inclus)
 
 services:
   # ─────────────────── PostgreSQL (Auth) ──────────────────────────────
@@ -24,10 +19,8 @@ services:
     networks: [devopstrack]
 
   # ─────────────────── Django : Auth‑Service ──────────────────────────
-  # === A) DEV : build local
   auth-service:
     build: { context: ../auth-service }
-    # === B) DEPLOIEMENT : utiliser l’image Nexus (décommente la ligne suivante et commente 'build')
     # image: 127.0.0.1:8083/docker-ci/auth-service:test2
     container_name: auth-service
     environment:
@@ -57,7 +50,7 @@ services:
   # ───────────── FastAPI Projects‑Service (API) ───────────────────────
   projects-service:
     build: { context: ../projects-service }
-    # image: 127.0.0.1:8083/docker-ci/projects-service:test2   # (B)
+    # image: 127.0.0.1:8083/docker-ci/projects-service:test2
     container_name: projects-service
     environment:
       MONGO_URL:  mongodb://projects-db:27017
@@ -82,7 +75,7 @@ services:
   # ──────────────── Tasks REST API (Node.js) ──────────────────────────
   tasks-service:
     build: { context: ../tasks-service }
-    # image: 127.0.0.1:8083/docker-ci/tasks-service:test2      # (B)
+    # image: 127.0.0.1:8083/docker-ci/tasks-service:test2
     container_name: tasks-service
     command: ["node", "src/server.js"]
     environment:
@@ -97,7 +90,7 @@ services:
   # ──────────────── Tasks Worker (background) ─────────────────────────
   tasks-worker:
     build: { context: ../tasks-service }
-    # image: 127.0.0.1:8083/docker-ci/tasks-worker:test2        # (B) si tu externalises aussi le worker
+    # image: 127.0.0.1:8083/docker-ci/tasks-worker:test2
     container_name: tasks-worker
     command: ["node", "src/worker.js"]
     environment:
@@ -129,7 +122,7 @@ services:
   # ───────────── Metrics‑Service (Go + Prometheus) ────────────────────
   metrics-service:
     build: { context: ../metrics-service }
-    # image: 127.0.0.1:8083/docker-ci/metrics-service:test2     # (B)
+    # image: 127.0.0.1:8083/docker-ci/metrics-service:test2
     container_name: metrics-service
     environment:
       INFLUXDB_URL:    http://metrics-db:8086
@@ -181,15 +174,14 @@ services:
       - "8083:8083"   # Registry Docker (HTTP)
     volumes:
       - nexus-data:/nexus-data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
-      interval: 30s
-      retries: 10
-    # (optionnel) un peu plus de RAM si tu pousses de grosses images
     environment:
       INSTALL4J_ADD_VM_PARAMS: >
         -Xms1g -Xmx2g -XX:MaxDirectMemorySize=2g
         -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
+      interval: 30s
+      retries: 10
     restart: unless-stopped
     networks: [devopstrack]
 
