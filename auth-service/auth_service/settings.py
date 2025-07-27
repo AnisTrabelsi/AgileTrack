@@ -27,13 +27,17 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 # ALLOWED_HOSTS n'accepte pas les schémas; CSRF_TRUSTED_ORIGINS DOIT inclure http/https.
 ALLOWED_HOSTS = _env_list(
     "DJANGO_ALLOWED_HOSTS",
-    "localhost,127.0.0.1"
+    ".127.0.0.1.nip.io,localhost,127.0.0.1",
 )
 
 CSRF_TRUSTED_ORIGINS = _env_list(
     "CSRF_TRUSTED_ORIGINS",
-    "http://localhost:5173"
+    "http://localhost:5173,http://devopstrack.127.0.0.1.nip.io,http://*.127.0.0.1.nip.io,https://*.127.0.0.1.nip.io",
 )
+
+# Si l'app est derrière un proxy/ingress (Traefik, NGINX, etc.)
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # ------------------------------------------------------------------
 # Applications
@@ -133,8 +137,15 @@ SIMPLE_JWT = {
 # ------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173"
+    "http://localhost:5173,http://devopstrack.127.0.0.1.nip.io",
 )
+
+# Pour autoriser dynamiquement toutes les sous-domaines nip.io en dev :
+CORS_ALLOWED_ORIGIN_REGEXES = _env_list(
+    "CORS_ALLOWED_ORIGIN_REGEXES",
+    r"^https?://.*\.127\.0\.0\.1\.nip\.io$",
+)
+
 # Si besoin de cookies cross-site (auth session), décommente:
 # CORS_ALLOW_CREDENTIALS = True
 

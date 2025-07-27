@@ -1,5 +1,5 @@
 # --- Middlewares : strip des préfixes /auth /projects /tasks
-apiVersion: traefik.io/v1alpha1
+apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
   name: strip-auth
@@ -9,7 +9,7 @@ spec:
     prefixes:
       - /auth
 ---
-apiVersion: traefik.io/v1alpha1
+apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
   name: strip-projects
@@ -19,7 +19,7 @@ spec:
     prefixes:
       - /projects
 ---
-apiVersion: traefik.io/v1alpha1
+apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
   name: strip-tasks
@@ -28,10 +28,20 @@ spec:
   stripPrefix:
     prefixes:
       - /tasks
-
-# --- IngressRoute : routes sur l'entrypoint web:80
 ---
-apiVersion: traefik.io/v1alpha1
+# Workaround AUTH : réécrit l'en-tête Host vers "localhost" (évite DisallowedHost)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: set-host-localhost
+  namespace: devopstrack
+spec:
+  headers:
+    customRequestHeaders:
+      Host: localhost
+---
+# --- IngressRoute : routes sur l'entrypoint web:80
+apiVersion: traefik.containo.us/v1alpha1
 kind: IngressRoute
 metadata:
   name: devopstrack
@@ -44,6 +54,7 @@ spec:
       match: Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/auth`)
       middlewares:
         - name: strip-auth
+        - name: set-host-localhost     # <-- workaround temporaire pour auth
       services:
         - name: auth-service
           port: 8000

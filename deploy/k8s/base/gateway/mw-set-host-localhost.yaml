@@ -1,0 +1,10 @@
+# deploy/k8s/base/gateway/mw-set-host-localhost.yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: set-host-localhost
+  namespace: devopstrack
+spec:
+  headers:
+    customRequestHeaders:
+      Host: localhost
