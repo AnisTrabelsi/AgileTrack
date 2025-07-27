@@ -1,0 +1,63 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-auth
+  namespace: devopstrack
+spec:
+  stripPrefixRegex:
+    regex:
+      - "^/auth"
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-projects
+  namespace: devopstrack
+spec:
+  stripPrefixRegex:
+    regex:
+      - "^/projects"
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-tasks
+  namespace: devopstrack
+spec:
+  stripPrefixRegex:
+    regex:
+      - "^/tasks"
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: devopstrack
+  namespace: devopstrack
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/auth`)
+      middlewares:
+        - name: strip-auth
+      services:
+        - name: auth-service
+          port: 8000
+    - kind: Rule
+      match: Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/projects`)
+      middlewares:
+        - name: strip-projects
+      services:
+        - name: projects-service
+          port: 8001
+    - kind: Rule
+      match: Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/tasks`)
+      middlewares:
+        - name: strip-tasks
+      services:
+        - name: tasks-service
+          port: 8002

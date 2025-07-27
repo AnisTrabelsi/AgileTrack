@@ -16,7 +16,7 @@ metadata:
   namespace: devopstrack
 type: Opaque
 stringData:
-  # ⚠️ A remplacer en prod
+  # ⚠️ À remplacer en prod
   DJANGO_SECRET_KEY: super-secret-dev-key
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: postgres
@@ -46,7 +46,7 @@ spec:
       containers:
         - name: auth
           image: ghcr.io/anistrabelsi/auth-service:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
@@ -69,23 +69,27 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_HOST
               value: auth-db-postgresql
+            # Accès via Traefik (nip.io)
+            - name: DJANGO_ALLOWED_HOSTS
+              value: ".127.0.0.1.nip.io,localhost,127.0.0.1"
+            - name: CSRF_TRUSTED_ORIGINS
+              value: "http://devopstrack.127.0.0.1.nip.io,https://devopstrack.127.0.0.1.nip.io"
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 20
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+
 ---
 apiVersion: v1
 kind: Service
@@ -93,8 +97,7 @@ metadata:
   name: auth-service
   namespace: devopstrack
 spec:
-  selector:
-    app.kubernetes.io/name: auth-service
+  selector: { app.kubernetes.io/name: auth-service }
   ports:
     - name: http
       port: 8000
@@ -124,7 +127,7 @@ spec:
       containers:
         - name: projects
           image: ghcr.io/anistrabelsi/projects-service:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8001
           env:
@@ -135,23 +138,21 @@ spec:
                 secretKeyRef:
                   name: devopstrack-app-secrets
                   key: JWT_SECRET
+            # IMPORTANT : pour l'accès via Traefik sur /projects/*
+            - name: UVICORN_CMD_ARGS
+              value: "--root-path /projects"
           readinessProbe:
-            tcpSocket:
-              port: 8001
+            tcpSocket: { port: 8001 }
             initialDelaySeconds: 10
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: 8001
+            tcpSocket: { port: 8001 }
             initialDelaySeconds: 30
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+
 ---
 apiVersion: v1
 kind: Service
@@ -159,8 +160,7 @@ metadata:
   name: projects-service
   namespace: devopstrack
 spec:
-  selector:
-    app.kubernetes.io/name: projects-service
+  selector: { app.kubernetes.io/name: projects-service }
   ports:
     - name: http
       port: 8001
@@ -190,7 +190,7 @@ spec:
       containers:
         - name: tasks-api
           image: ghcr.io/anistrabelsi/tasks-service:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["node", "src/server.js"]
           ports:
             - containerPort: 8002
@@ -203,22 +203,17 @@ spec:
             - name: REDIS_URL
               value: redis://tasks-redis-master:6379
           readinessProbe:
-            tcpSocket:
-              port: 8002
+            tcpSocket: { port: 8002 }
             initialDelaySeconds: 10
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: 8002
+            tcpSocket: { port: 8002 }
             initialDelaySeconds: 30
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+
 ---
 apiVersion: v1
 kind: Service
@@ -226,8 +221,7 @@ metadata:
   name: tasks-service
   namespace: devopstrack
 spec:
-  selector:
-    app.kubernetes.io/name: tasks-service
+  selector: { app.kubernetes.io/name: tasks-service }
   ports:
     - name: http
       port: 8002
@@ -258,18 +252,14 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/anistrabelsi/tasks-service:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["node", "src/worker.js"]
           env:
             - name: REDIS_URL
               value: redis://tasks-redis-master:6379
           resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "300m"
-              memory: "256Mi"
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "300m", memory: "256Mi" }
 
 ---
 apiVersion: apps/v1
@@ -294,7 +284,7 @@ spec:
       containers:
         - name: metrics
           image: ghcr.io/anistrabelsi/metrics-service:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 9100
           env:
@@ -310,22 +300,17 @@ spec:
                   name: devopstrack-app-secrets
                   key: INFLUXDB_TOKEN
           readinessProbe:
-            tcpSocket:
-              port: 9100
+            tcpSocket: { port: 9100 }
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: 9100
+            tcpSocket: { port: 9100 }
             initialDelaySeconds: 20
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "300m"
-              memory: "256Mi"
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "300m", memory: "256Mi" }
+
 ---
 apiVersion: v1
 kind: Service
@@ -333,8 +318,7 @@ metadata:
   name: metrics-service
   namespace: devopstrack
 spec:
-  selector:
-    app.kubernetes.io/name: metrics-service
+  selector: { app.kubernetes.io/name: metrics-service }
   ports:
     - name: http
       port: 9100

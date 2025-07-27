@@ -9,13 +9,31 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ------------------------------------------------------------------
+# Helpers ENV
+# ------------------------------------------------------------------
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [x.strip() for x in os.getenv(name, default).split(",") if x.strip()]
+
+# ------------------------------------------------------------------
 # Sécurité
 # ------------------------------------------------------------------
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-for-local-only")
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
+# ⚠️ IMPORTANT : on lit d'abord l'ENV, sinon on retombe sur des valeurs dev.
+# ALLOWED_HOSTS n'accepte pas les schémas; CSRF_TRUSTED_ORIGINS DOIT inclure http/https.
+ALLOWED_HOSTS = _env_list(
+    "DJANGO_ALLOWED_HOSTS",
+    "localhost,127.0.0.1"
+)
+
+CSRF_TRUSTED_ORIGINS = _env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:5173"
+)
 
 # ------------------------------------------------------------------
 # Applications
@@ -31,7 +49,7 @@ INSTALLED_APPS = [
     # Tiers
     "rest_framework",
     "rest_framework_simplejwt",
-    "corsheaders",               # <-- CORS
+    "corsheaders",               # CORS
 
     # Local
     "users",
@@ -41,7 +59,7 @@ INSTALLED_APPS = [
 # Middleware
 # ------------------------------------------------------------------
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",     # <-- doit venir avant CommonMiddleware
+    "corsheaders.middleware.CorsMiddleware",     # doit venir avant CommonMiddleware
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -72,21 +90,28 @@ TEMPLATES = [
 WSGI_APPLICATION = "auth_service.wsgi.application"
 
 # ------------------------------------------------------------------
-# Base de données (PostgreSQL, service auth-db)
+# Base de données (PostgreSQL)
 # ------------------------------------------------------------------
+# Par défaut, on vise le service Bitnami : auth-db-postgresql
+POSTGRES_DB = os.getenv("POSTGRES_DB", "auth")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "auth-db-postgresql")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "auth",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
-        "HOST": "auth-db",
-        "PORT": 5432,
+        "NAME": POSTGRES_DB,
+        "USER": POSTGRES_USER,
+        "PASSWORD": POSTGRES_PASSWORD,
+        "HOST": POSTGRES_HOST,
+        "PORT": POSTGRES_PORT,
     }
 }
 
 # ------------------------------------------------------------------
-# REST Framework + JWT
+# REST Framework + JWT
 # ------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -104,11 +129,14 @@ SIMPLE_JWT = {
 }
 
 # ------------------------------------------------------------------
-# CORS : autorise le front Vite (localhost:5173)
+# CORS (front Vite, etc.)
 # ------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
+CORS_ALLOWED_ORIGINS = _env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173"
+)
+# Si besoin de cookies cross-site (auth session), décommente:
+# CORS_ALLOW_CREDENTIALS = True
 
 # ------------------------------------------------------------------
 # Internationalisation / statiques
