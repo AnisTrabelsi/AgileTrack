@@ -1,0 +1,97 @@
+# ------------------------------------------------------------
+# CI - DevOpsTrack (SonarCloud + Build & Push Docker -> GHCR)
+# ------------------------------------------------------------
+name: CI - DevOpsTrack
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+# ⚠️ Désactive "Automatic Analysis" dans SonarCloud (Project Settings ▸ Analysis Method).
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tests + SonarCloud
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps (frontend)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Tests (frontend) + coverage (si présent)
+        run: npm --prefix frontend run --if-present test -- --coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}
+
+  docker-build-push:
+    name: Build & Push images (GHCR)
+    needs: quality
+    if: ${{ success() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # nécessaire pour pousser vers GHCR
+
+    strategy:
+      matrix:
+        service: [auth-service, projects-service, tasks-service, metrics-service]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ⇩⇩ Met l'owner en minuscules (GHCR exige les chemins en lowercase)
+      - name: Compute lowercase owner
+        shell: bash
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Build & Push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
