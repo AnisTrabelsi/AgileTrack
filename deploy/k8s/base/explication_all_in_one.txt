@@ -1,0 +1,65 @@
+C’est **un manifeste Kubernetes “tout‑en‑un”**.
+Il décrit *toutes* les ressources nécessaires pour faire tourner ton mini‑stack **DevOpsTrack** *et* la **mise en
+route HTTP via Traefik**, en une seule application de fichier.
+
+### À quoi il sert, concrètement
+
+* **Créer/assurer le namespace** `devopstrack`.
+* **Stocker des secrets** de dev (JWT, token Influx) dans `devopstrack-app-secrets`.
+* **Déployer les apps** :
+
+  * **frontend** (Nginx) + **ConfigMap** qui fournit `index.html`.
+  * **projects‑service** (FastAPI) + Service ClusterIP.
+  * **tasks‑service** (Node/Express) + Service ClusterIP.
+  * **tasks‑worker** (process de fond).
+  * **metrics‑service** (optionnel) + Service ClusterIP.
+* **Configurer Traefik** (CRD v3 `traefik.io/v1alpha1`) :
+
+  * Deux **Middlewares** `stripPrefix` pour retirer `/projects` et `/tasks`.
+  * Un **IngressRoute** unique qui route le host
+    `devopstrack.127.0.0.1.nip.io` vers :
+
+    * `/projects` → `projects-service:8001` (après strip `/projects`)
+    * `/tasks` → `tasks-service:8002` (après strip `/tasks`)
+    * `/` et `/index.html` → `frontend:80`
+
+> Résultat : tu accèdes à tout via **un seul host** (nip.io) et des **chemins** :
+>
+> * `/` → page d’accueil (frontend)
+> * `/projects/docs` → Swagger FastAPI
+> * `/tasks/health` → health de l’API Node
+
+### Quand l’utiliser
+
+* **En local** avec ton cluster k3d/k3s et **Traefik** déjà installé (service `traefik` en `LoadBalancer`).
+* Quand tu veux **appliquer / réappliquer** tout l’environnement d’un coup, sans gérer des fichiers séparés.
+
+### Commandes utiles
+
+```powershell
+# déployer tout
+kubectl apply -f deploy/k8s/base/all-in-one.yaml
+
+# vérifier
+kubectl -n devopstrack get deploy,svc,pods
+kubectl -n devopstrack get ingressroute.traefik.io
+kubectl -n kube-system logs deploy/traefik --since=2m --tail=200
+
+# tester depuis ta machine (Host header requis)
+Invoke-WebRequest -UseBasicParsing -Headers @{Host="devopstrack.127.0.0.1.nip.io"} http://127.0.0.1/
+Invoke-WebRequest -UseBasicParsing -Headers @{Host="devopstrack.127.0.0.1.nip.io"} http://127.0.0.1/projects/docs
+Invoke-WebRequest -UseBasicParsing -Headers @{Host="devopstrack.127.0.0.1.nip.io"} http://127.0.0.1/tasks/health
+
+# nettoyer (supprime tout ce que crée le fichier, mais garde le namespace)
+kubectl delete -f deploy/k8s/base/all-in-one.yaml
+```
+
+### Personnalisation rapide
+
+* **Changer l’host** : modifie `Host(\`devopstrack.127.0.0.1.nip.io\`)\` dans l’IngressRoute.
+* **Désactiver metrics** : supprime les blocs `metrics-service` (Deployment + Service).
+* **TLS / HTTPS** : remplace `entryPoints: ["web"]` par `["websecure"]` et ajoute un `tls:` (cert géré par Traefik/Cert‑Manager).
+* **Scaling** : ajuste `replicas` de chaque Deployment.
+* **Images privées** : décommente `imagePullSecrets`.
+
+En bref : **ce fichier déploie les services et branche Traefik** pour que tout soit accessible via un seul nom de domaine local et des chemins clairs.
