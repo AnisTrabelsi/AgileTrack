@@ -1,5 +1,5 @@
 ##############################################################################
-# EKS 1.30 – module v20 (provider AWS v5)
+# EKS 1.30 – module v20 (provider AWS v5)  cluster EKS 1.30 + node group Spot
 ##############################################################################
 
 data "aws_caller_identity" "current" {}

@@ -1,5 +1,5 @@
 ##############################################################################
-# Dépôts ECR – module v1.7 (simple et robuste)
+# Dépôts ECR – module v1.7 (simple et robuste) dépôts ECR pour les images
 ##############################################################################
 
 locals {

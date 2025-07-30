@@ -1,14 +1,11 @@
-# =====================================================================
-# DevOpsTrack — All-in-one (Namespace, ConfigMap, Deployments, Services, Traefik CRDs)
-# Namespace : devopstrack
-# Pré-requis installés via Helm (bitnami/*) :
-#   - MongoDB   : Service  -> projects-db-mongodb
-#   - Redis     : Service  -> tasks-redis-master
-#   - InfluxDB2 : Service  -> metrics-db-influxdb2   (si metrics utilisé)
-# Images      : ghcr.io/anistrabelsi/* (+ image-pull-ghcr si besoin)
-# Traefik     : utilise les CRD v3 -> apiVersion: traefik.io/v1alpha1
-# =====================================================================
+##############################################################################
+# DevOpsTrack – All‑in‑one (v2025‑07)   HTTPS ready (Traefik v3 + Let’s Encrypt)
+# LoadBalancer DNS : ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com
+##############################################################################
 
+############################
+# 🌐  Namespace & Secrets  #
+############################
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -21,11 +18,12 @@ metadata:
   namespace: devopstrack
 type: Opaque
 stringData:
-  # ⚠️ Remplacer en prod
-  JWT_SECRET: super-secret-dev-key
+  JWT_SECRET: super-secret-dev-key        # ⇢ remplace en production
   INFLUXDB_TOKEN: dev-token
 
-# -------------------- Frontend (Nginx + placeholder) --------------------
+############################
+# 🌍  Frontend (placeholder)
+############################
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -34,27 +32,17 @@ metadata:
   namespace: devopstrack
 data:
   index.html: |
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <title>DevOpsTrack Frontend (placeholder)</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <style>
-          body { font-family: system-ui, sans-serif; max-width: 800px; margin: 4rem auto; line-height: 1.5; }
-          code,kbd { background: #f6f8fa; padding: .1rem .3rem; border-radius: .25rem; }
-          a { text-decoration: none; }
-        </style>
-      </head>
-      <body>
-        <h1>Frontend de test</h1>
-        <p>Traefik route <code>/</code> sur ce frontend, <code>/projects</code> sur FastAPI, <code>/tasks</code> sur Node.</p>
-        <ul>
-          <li><a href="/projects/docs">Swagger Projects</a></li>
-          <li><a href="/tasks/health">Tasks /health</a></li>
-        </ul>
-      </body>
-    </html>
+    <!doctype html><html><head><meta charset="utf-8"/>
+    <title>DevOpsTrack Frontend</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <style>body{font-family:system-ui,sans-serif;max-width:800px;margin:4rem auto;line-height:1.5}</style>
+    </head><body>
+    <h1>DevOpsTrack – Frontend (placeholder)</h1>
+    <p>Routes :</p><ul>
+      <li><code>/auth</code> → Django API</li>
+      <li><code>/projects</code> → FastAPI</li>
+      <li><code>/tasks</code> → Node API</li>
+    </ul></body></html>
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -73,18 +61,13 @@ spec:
       containers:
         - name: web
           image: nginx:1.27-alpine
-          imagePullPolicy: IfNotPresent
-          ports: [ { containerPort: 80 } ]
+          ports: [{ containerPort: 80 }]
           volumeMounts:
             - name: html
               mountPath: /usr/share/nginx/html/index.html
               subPath: index.html
-          readinessProbe:
-            httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 3
-          livenessProbe:
-            httpGet: { path: /, port: 80 }
-            initialDelaySeconds: 10
+          readinessProbe: { httpGet: { path: /, port: 80 }, initialDelaySeconds: 3 }
+          livenessProbe:  { httpGet: { path: /, port: 80 }, initialDelaySeconds: 10 }
       volumes:
         - name: html
           configMap: { name: frontend-index }
@@ -96,13 +79,56 @@ metadata:
   namespace: devopstrack
 spec:
   selector: { app.kubernetes.io/name: frontend }
-  ports:
-    - name: http
-      port: 80
-      targetPort: 80
+  ports: [{ name: http, port: 80, targetPort: 80 }]
   type: ClusterIP
 
-# -------------------- Projects (FastAPI) --------------------
+############################
+# 🔐  Auth‑service (Django)
+############################
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: devopstrack
+  labels: { app.kubernetes.io/name: auth-service }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: auth-service }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: auth-service }
+    spec:
+      containers:
+        - name: auth
+          image: ghcr.io/anistrabelsi/auth-service:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: DATABASE_URL
+              value: postgres://postgres:postgres@auth-db-postgresql:5432/auth
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: devopstrack-app-secrets, key: JWT_SECRET } }
+          readinessProbe: { tcpSocket: { port: 8000 }, initialDelaySeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8000 }, initialDelaySeconds: 30 }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: devopstrack
+spec:
+  selector: { app.kubernetes.io/name: auth-service }
+  ports: [{ name: http, port: 8000, targetPort: 8000 }]
+  type: ClusterIP
+
+############################
+# 📦  Projects‑service
+############################
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -118,32 +144,22 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: projects-service }
     spec:
-      # imagePullSecrets:
-      #   - name: image-pull-ghcr
       containers:
         - name: projects
           image: ghcr.io/anistrabelsi/projects-service:latest
-          imagePullPolicy: IfNotPresent
-          ports: [ { containerPort: 8001 } ]
+          ports: [{ containerPort: 8001 }]
           env:
             - name: MONGO_URL
               value: mongodb://projects-db-mongodb:27017
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: devopstrack-app-secrets, key: JWT_SECRET } }
-            # IMPORTANT : pour servir sous /projects via Traefik (stripPrefix)
             - name: UVICORN_CMD_ARGS
               value: "--root-path /projects"
-          readinessProbe:
-            tcpSocket: { port: 8001 }
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket: { port: 8001 }
-            initialDelaySeconds: 30
-            periodSeconds: 10
+          readinessProbe: { tcpSocket: { port: 8001 }, initialDelaySeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8001 }, initialDelaySeconds: 30 }
           resources:
-            requests: { cpu: "100m", memory: "128Mi" }
-            limits:   { cpu: "500m", memory: "512Mi" }
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -152,13 +168,12 @@ metadata:
   namespace: devopstrack
 spec:
   selector: { app.kubernetes.io/name: projects-service }
-  ports:
-    - name: http
-      port: 8001
-      targetPort: 8001
+  ports: [{ name: http, port: 8001, targetPort: 8001 }]
   type: ClusterIP
 
-# -------------------- Tasks (Node API + Worker) --------------------
+############################
+# 🛠️  Tasks‑service (API)
+############################
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -174,30 +189,21 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: tasks-service }
     spec:
-      # imagePullSecrets:
-      #   - name: image-pull-ghcr
       containers:
         - name: tasks-api
           image: ghcr.io/anistrabelsi/tasks-service:latest
-          imagePullPolicy: IfNotPresent
-          command: ["node", "src/server.js"]
-          ports: [ { containerPort: 8002 } ]
+          command: ["node","src/server.js"]
+          ports: [{ containerPort: 8002 }]
           env:
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: devopstrack-app-secrets, key: JWT_SECRET } }
             - name: REDIS_URL
               value: redis://tasks-redis-master:6379
-          readinessProbe:
-            tcpSocket: { port: 8002 }
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket: { port: 8002 }
-            initialDelaySeconds: 30
-            periodSeconds: 10
+          readinessProbe: { tcpSocket: { port: 8002 }, initialDelaySeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: 8002 }, initialDelaySeconds: 30 }
           resources:
-            requests: { cpu: "100m", memory: "128Mi" }
-            limits:   { cpu: "500m", memory: "512Mi" }
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -206,11 +212,12 @@ metadata:
   namespace: devopstrack
 spec:
   selector: { app.kubernetes.io/name: tasks-service }
-  ports:
-    - name: http
-      port: 8002
-      targetPort: 8002
+  ports: [{ name: http, port: 8002, targetPort: 8002 }]
   type: ClusterIP
+
+############################
+# 🛠️  Tasks‑worker
+############################
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -226,21 +233,20 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: tasks-worker }
     spec:
-      # imagePullSecrets:
-      #   - name: image-pull-ghcr
       containers:
         - name: worker
           image: ghcr.io/anistrabelsi/tasks-service:latest
-          imagePullPolicy: IfNotPresent
-          command: ["node", "src/worker.js"]
+          command: ["node","src/worker.js"]
           env:
             - name: REDIS_URL
               value: redis://tasks-redis-master:6379
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
-            limits:   { cpu: "300m", memory: "256Mi" }
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 300m, memory: 256Mi }
 
-# -------------------- Metrics (optionnel) --------------------
+############################
+# 📊  Metrics‑service
+############################
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -256,13 +262,10 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: metrics-service }
     spec:
-      # imagePullSecrets:
-      #   - name: image-pull-ghcr
       containers:
         - name: metrics
           image: ghcr.io/anistrabelsi/metrics-service:latest
-          imagePullPolicy: IfNotPresent
-          ports: [ { containerPort: 9100 } ]
+          ports: [{ containerPort: 9100 }]
           env:
             - name: INFLUXDB_URL
               value: http://metrics-db-influxdb2:8086
@@ -272,17 +275,11 @@ spec:
               value: metrics
             - name: INFLUXDB_TOKEN
               valueFrom: { secretKeyRef: { name: devopstrack-app-secrets, key: INFLUXDB_TOKEN } }
-          readinessProbe:
-            tcpSocket: { port: 9100 }
-            initialDelaySeconds: 5
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket: { port: 9100 }
-            initialDelaySeconds: 20
-            periodSeconds: 10
+          readinessProbe: { tcpSocket: { port: 9100 }, initialDelaySeconds: 5 }
+          livenessProbe:  { tcpSocket: { port: 9100 }, initialDelaySeconds: 20 }
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
-            limits:   { cpu: "300m", memory: "256Mi" }
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 300m, memory: 256Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -291,31 +288,31 @@ metadata:
   namespace: devopstrack
 spec:
   selector: { app.kubernetes.io/name: metrics-service }
-  ports:
-    - name: http
-      port: 9100
-      targetPort: 9100
+  ports: [{ name: http, port: 9100, targetPort: 9100 }]
   type: ClusterIP
 
-# -------------------- Traefik Middlewares + IngressRoute (v3) --------------------
+############################
+# 🚦  Traefik middlewares
+############################
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
-metadata:
-  name: strip-projects
-  namespace: devopstrack
-spec:
-  stripPrefix:
-    prefixes: ["/projects"]
+metadata: { name: strip-auth, namespace: devopstrack }
+spec: { stripPrefix: { prefixes: ["/auth"] } }
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
-metadata:
-  name: strip-tasks
-  namespace: devopstrack
-spec:
-  stripPrefix:
-    prefixes: ["/tasks"]
+metadata: { name: strip-projects, namespace: devopstrack }
+spec: { stripPrefix: { prefixes: ["/projects"] } }
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata: { name: strip-tasks, namespace: devopstrack }
+spec: { stripPrefix: { prefixes: ["/tasks"] } }
+
+############################
+# 🚪  IngressRoute (HTTPS)
+############################
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -323,31 +320,35 @@ metadata:
   name: devopstrack
   namespace: devopstrack
 spec:
-  entryPoints: ["web"]
+  entryPoints: ["web", "websecure"]
+  tls:
+    certResolver: le
   routes:
-    - kind: Rule
-      match: "Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/projects`)"
+    - match: Host(`ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com`) && PathPrefix(`/auth`)
+      kind: Rule
+      middlewares: [{ name: strip-auth }]
+      services:   [{ name: auth-service,     port: 8000 }]
+    - match: Host(`ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com`) && PathPrefix(`/projects`)
+      kind: Rule
       middlewares: [{ name: strip-projects }]
-      services: [{ name: projects-service, port: 8001 }]
-    - kind: Rule
-      match: "Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/tasks`)"
+      services:   [{ name: projects-service, port: 8001 }]
+    - match: Host(`ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com`) && PathPrefix(`/tasks`)
+      kind: Rule
       middlewares: [{ name: strip-tasks }]
-      services: [{ name: tasks-service, port: 8002 }]
-    - kind: Rule
-      match: "Host(`devopstrack.127.0.0.1.nip.io`) && (Path(`/`) || Path(`/index.html`))"
+      services:   [{ name: tasks-service,    port: 8002 }]
+    - match: Host(`ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com`) && (Path(`/`) || Path(`/index.html`))
+      kind: Rule
       priority: 1
       services: [{ name: frontend, port: 80 }]
 
-# -------------------- Traefik Dashboard (via api@internal) --------------------
+############################
+# 📊  Traefik dashboard
+############################
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
-metadata:
-  name: dashboard-strip
-  namespace: kube-system
-spec:
-  stripPrefix:
-    prefixes: ["/dashboard"]
+metadata: { name: dashboard-strip, namespace: kube-system }
+spec: { stripPrefix: { prefixes: ["/dashboard"] } }
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -355,13 +356,11 @@ metadata:
   name: traefik-dashboard
   namespace: kube-system
 spec:
-  entryPoints:
-    - web
+  entryPoints: ["web", "websecure"]
+  tls:
+    certResolver: le
   routes:
-    - match: "Host(`devopstrack.127.0.0.1.nip.io`) && PathPrefix(`/dashboard`)"
+    - match: Host(`ae8a9ba62fa8e48d6b02c39068b49166-408907621.eu-west-3.elb.amazonaws.com`) && PathPrefix(`/dashboard`)
       kind: Rule
-      middlewares:
-        - name: dashboard-strip
-      services:
-        - kind: TraefikService
-          name: api@internal
+      middlewares: [{ name: dashboard-strip }]
+      services:   [{ kind: TraefikService, name: api@internal }]
