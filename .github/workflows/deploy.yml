@@ -1,0 +1,36 @@
+name: Deploy-K8s
+
+on:
+  workflow_run:
+    workflows: [ "CI-Build" ]
+    types: [ completed ]
+    branches: [ master ]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-3
+  CLUSTER_NAME: devopstrack-eks
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+
+      - name: kubectl apply
+        run: kubectl apply -f deploy/k8s/base/all-in-one.yaml
+
+      - name: Verify rollout
+        run: kubectl -n devopstrack get deploy -o wide

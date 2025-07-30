@@ -1,0 +1,47 @@
+name: Terraform
+
+on:
+  push:
+    branches: [ master ]
+    paths: [ 'infra/terraform/**' ]
+  pull_request:
+    paths: [ 'infra/terraform/**' ]
+
+env:
+  TF_DIR: infra/terraform
+  AWS_REGION: eu-west-3
+
+permissions:
+  contents: read
+  id-token: write   # OIDC
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: terraform -chdir=$TF_DIR init -input=false
+      - run: terraform -chdir=$TF_DIR fmt -check
+      - run: terraform -chdir=$TF_DIR validate
+      - run: terraform -chdir=$TF_DIR plan -no-color
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production     # bouton « Approve » dans GitHub UI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - run: terraform -chdir=$TF_DIR init -input=false
+      - run: terraform -chdir=$TF_DIR apply -auto-approve
