@@ -19,7 +19,7 @@ module "ecr" {
 
   for_each                = toset(local.ecr_repos)
   repository_name         = each.value
-  create_lifecycle_policy = false   # pas de policy pour éviter l'erreur 400
+  create_lifecycle_policy = false # pas de policy pour éviter l'erreur 400
 
   tags = { Project = "devopstrack" }
 }

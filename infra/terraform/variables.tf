@@ -20,5 +20,5 @@ variable "desired_capacity" {
 
 variable "node_instance_types" {
   type    = list(string)
-  default = ["t3.small"]     # instance compatible EKS
+  default = ["t3.small"] # instance compatible EKS
 }
