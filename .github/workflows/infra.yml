@@ -1,29 +1,36 @@
+# ------------------------------------------------------------
+#  Terraform – infrastructure EKS / VPC / ECR / S3 backend
+# ------------------------------------------------------------
 name: Terraform
 
 on:
   push:
     branches: [ main, master ]
-    paths: [ 'infra/terraform/**' ]
+    paths:   [ 'infra/terraform/**' ]
   pull_request:
-    paths: [ 'infra/terraform/**' ]
+    paths:   [ 'infra/terraform/**' ]
 
 env:
-  TF_DIR: infra/terraform
+  TF_DIR:     infra/terraform
   AWS_REGION: eu-west-3
 
 permissions:
   contents: read
-  id-token: write       # OIDC vers AWS
+  id-token: write   # OIDC vers AWS
 
 jobs:
+  # ---------- PLAN ----------
   plan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: hashicorp/setup-terraform@v3
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          role-session-name: github-actions
           aws-region: ${{ env.AWS_REGION }}
 
       - run: terraform -chdir=$TF_DIR init -input=false
@@ -31,17 +38,22 @@ jobs:
       - run: terraform -chdir=$TF_DIR validate
       - run: terraform -chdir=$TF_DIR plan -no-color
 
+  # ---------- APPLY ----------
   apply:
     needs: plan
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    environment: production      # bouton « Approve »
+    environment: production   # bouton d’approbation
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: hashicorp/setup-terraform@v3
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          role-session-name: github-actions
           aws-region: ${{ env.AWS_REGION }}
 
       - run: terraform -chdir=$TF_DIR init -input=false

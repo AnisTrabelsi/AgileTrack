@@ -1,29 +1,36 @@
+# ------------------------------------------------------------
+#  Déploiement continu – DevOpsTrack (EKS)
+#    • déclenché quand le workflow CI termine avec succès
+# ------------------------------------------------------------
 name: Deploy‑to‑EKS
 
 on:
   workflow_run:
-    workflows: [ "CI - DevOpsTrack" ]   # nom déclaré dans ci.yml
-    types: [ completed ]
+    workflows: [ "CI - DevOpsTrack" ]   # nom exact du workflow CI
+    types:    [ completed ]
     branches: [ master ]
 
 jobs:
   deploy:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+
     env:
-      AWS_REGION: eu-west-3
+      AWS_REGION:   eu-west-3
       CLUSTER_NAME: devopstrack-eks
 
     permissions:
       contents: read
-      id-token: write    # OIDC vers AWS
+      id-token: write   # OIDC vers AWS
 
     steps:
       - uses: actions/checkout@v4
 
+      # ⬇️  Assume le rôle IAM via OIDC
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
+          role-session-name: github-actions
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
