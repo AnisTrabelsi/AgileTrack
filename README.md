@@ -8,11 +8,11 @@ DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines 
 
 * **Authentification JWT** : connexion sécurisée, rafraîchissement de jetons.  
 * **Gestion des utilisateurs** : rôles & droits (PostgreSQL).  
-* **Module Projets** : CRUD dépôts / environnements / versions (FastAPI + MongoDB).  
+* **Module Projets** : CRUD dépôts / env. / versions (FastAPI + MongoDB).  
 * **Module Tâches** : file Redis simulant des jobs CI/CD, état en temps réel (API + worker).  
 * **Métriques & Logs** : endpoint `/metrics` (Prometheus), stockage InfluxDB.  
 * **Tableau de bord Web** : React 18 (Vite) + Tailwind (graphiques builds & jobs).  
-* **Registry d’images** : **GHCR** (par défaut) – *Nexus 3 optionnel via Compose.*  
+* **Registry d’images** : **GHCR** (par défaut) – *Nexus 3 optionnel via Compose.*  
 * **Surveillance** : Prometheus scrappe les services, Grafana fournit les dashboards.  
 * **Pipeline CI/CD** : GitHub Actions → Build → Push GHCR → Déploiement (Terraform + `kubectl`).  
 
@@ -44,14 +44,14 @@ cd <repo>
 docker compose -f deploy/compose.yml up --build -d
 ```
 
-| Service        | URL par défaut                                                 |
-| -------------- | -------------------------------------------------------------- |
-| Auth API       | [http://localhost:8000](http://localhost:8000)                 |
-| Projects API   | [http://localhost:8001](http://localhost:8001)                 |
-| Tasks API      | [http://localhost:8002](http://localhost:8002)                 |
-| Prometheus     | [http://localhost:9090](http://localhost:9090)                 |
-| Grafana        | [http://localhost:3000](http://localhost:3000) (admin / admin) |
-| Nexus (option) | [http://localhost:8081](http://localhost:8081)                 |
+| Service       | URL par défaut                                               |
+| ------------- | ------------------------------------------------------------ |
+| Auth API      | [http://localhost:8000](http://localhost:8000)               |
+| Projects API  | [http://localhost:8001](http://localhost:8001)               |
+| Tasks API     | [http://localhost:8002](http://localhost:8002)               |
+| Prometheus    | [http://localhost:9090](http://localhost:9090)               |
+| Grafana       | [http://localhost:3000](http://localhost:3000) (admin/admin) |
+| Nexus \*(opt) | [http://localhost:8081](http://localhost:8081)               |
 
 Arrêt & nettoyage :
 
@@ -114,7 +114,7 @@ kubectl -n devopstrack get pods
 
 ---
 
-## ☁️ Déploiement **production – AWS EKS**
+## ☁️ Déploiement **production – AWS EKS**
 
 ### 🔑 Prérequis
 
@@ -123,7 +123,7 @@ kubectl -n devopstrack get pods
 | Bucket S3 `devopstrack-tfstate-*`           | Fichier d’état Terraform |
 | Table DynamoDB `devopstrack-tf-lock`        | Verrouillage état        |
 | Rôle IAM **`gha-eks-deploy`** + OIDC GitHub | `id-token:write` pour CI |
-| Secrets GitHub `AWS_ROLE_TO_ASSUME`         | ARN du rôle ci‑dessus    |
+| Secrets GitHub : `AWS_ROLE_TO_ASSUME`       | ARN du rôle ci‑dessus    |
 
 ### 1) Infra (Terraform)
 
@@ -137,12 +137,12 @@ aws eks update-kubeconfig --name devopstrack-eks --region eu-west-3
 
 ### 2) Pipelines GitHub Actions
 
-| Fichier workflow                    | Fonction                          |
-| ----------------------------------- | --------------------------------- |
-| `.github/workflows/ci.yml`          | Tests + Sonar ⟶ Build & Push GHCR |
-| `.github/workflows/infra-plan.yml`  | `terraform plan` sur PR           |
-| `.github/workflows/infra-apply.yml` | `terraform apply` sur `main`      |
-| `.github/workflows/deploy-eks.yml`  | `kubectl apply` manifeste K8s     |
+| Fichier workflow                    | Fonction                                |
+| ----------------------------------- | --------------------------------------- |
+| `.github/workflows/ci.yml`          | Tests + Sonar ⟶ Build & Push GHCR       |
+| `.github/workflows/infra-plan.yml`  | `terraform plan` sur chaque PR          |
+| `.github/workflows/infra-apply.yml` | `terraform apply` sur `main` (approval) |
+| `.github/workflows/deploy-eks.yml`  | `kubectl apply` manifeste K8s           |
 
 ---
 
@@ -155,45 +155,41 @@ aws eks update-kubeconfig --name devopstrack-eks --region eu-west-3
 | **Plan/Apply Infra** | `infra‑*.yml`         | Terraform (S3 state)                   |
 | **Deploy App**       | `deploy-eks.yml`      | `kubectl apply` des manifests          |
 
-Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`, `PAT_GHCR` *(si besoin)*.
+Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`.
 
 ---
 
 ## 🏗️ Composants **AWS** mobilisés
 
-| Couche            | Services AWS                                 |
-| ----------------- | -------------------------------------------- |
-| **Réseau**        | VPC, Subnets (3× AZ), IGW, NAT GW, SG        |
-| **Calcul**        | **EKS** 1.30 + Managed Nodes Spot            |
-| **Conteneurs**    | **ECR** (6 repositories)                     |
-| **Stockage**      | S3 (tfstate), DynamoDB (lock)                |
-| **Sécurité**      | IAM Roles (cluster, nodes, OIDC GitHub), KMS |
-| **Observabilité** | CloudWatch Logs                              |
-| **Exposition**    | ELB (Traefik) + Route 53/ACM (option)        |
+| Couche            | Services AWS                                  |
+| ----------------- | --------------------------------------------- |
+| **Réseau**        | VPC, Subnets (3× AZ), IGW, NAT GW, SG         |
+| **Calcul**        | **EKS** 1.30 + Managed Nodes Spot             |
+| **Conteneurs**    | **ECR** (6 repositories)                      |
+| **Stockage**      | S3 (tfstate), DynamoDB (lock)                 |
+| **Sécurité**      | IAM Roles (cluster, nodes, OIDC GitHub) / KMS |
+| **Observabilité** | CloudWatch Logs                               |
+| **Exposition**    | ELB (Traefik) + Route 53/ACM (option)         |
 
 ---
 
-## 📂 Arborescence
+## 📂 Arborescence (racine)
 
 ```
-frontend/
-auth-service/
-projects-service/
-tasks-service/
-metrics-service/
+frontend/                     # React
+auth-service/                 # Django
+projects-service/             # FastAPI
+tasks-service/                # Node API + worker
+metrics-service/              # Go /metrics
 deploy/
-  compose.yml
-  k8s/
-    base/
-      all-in-one.yaml
+  compose.yml                 # Stack locale
+  k8s/base/
+    all-in-one.yaml           # Namespace + Apps + Traefik
 infra/
-  terraform/
-  ansible/
+  terraform/                  # VPC, EKS, ECR, KMS
+  ansible/                    # (playbooks futurs Day‑2)
 .github/
-  workflows/
-    ci.yml
-    infra.yml
-    deploy-eks.yml
+  workflows/                  # CI / Terraform / Deploy
 ```
 
 ---
@@ -209,14 +205,21 @@ curl http://localhost:8001/docs
 
 ---
 
-## ❗ Bonnes pratiques & suites
+## 🔥 Bonnes pratiques & suites
 
-* Migrer les bases vers **services managés** (RDS, Atlas, ElastiCache).
-* Externaliser les secrets via **AWS Secrets Manager + External‑Secrets**.
-* Ajouter des probes `/healthz` et activer HPA/KEDA.
-* Passer les manifests en **Helm Charts** puis GitOps (*Argo CD*).
-* Durcir le rôle `gha‑eks‑deploy` (least privilege).
-* Centraliser logs & traces (Loki + Grafana Tempo).
+* Migrer les bases vers **services managés** (RDS, Atlas…).  
+* Externaliser les secrets avec **AWS Secrets Manager + External‑Secrets**.  
+* Ajouter des probes `/healthz`, HPA/KEDA.  
+* Helm Charts + GitOps (*Argo CD*).  
+* Affiner le rôle `gha‑eks‑deploy` (least‑privilege).  
+* Centraliser logs (e.g. Loki) & traces (OTel).  
 
-Happy Shipping 🚀
+Happy Shipping 🚀
 
+---
+
+### ✅ Commit message suggéré
+
+```
+docs: update README with full stack (local & AWS), CI/CD, AWS architecture
+```
