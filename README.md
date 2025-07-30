@@ -1,6 +1,3 @@
-**`README.md`**
-
-````markdown
 # DevOpsTrack
 
 DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines CI/CD, gérer des projets techniques et agréger des métriques d’exécution en temps réel.
@@ -45,7 +42,7 @@ cd <repo>
 
 # Lancer tous les services (Nexus & SonarQube si activés)
 docker compose -f deploy/compose.yml up --build -d
-````
+```
 
 | Service        | URL par défaut                                                 |
 | -------------- | -------------------------------------------------------------- |
@@ -195,8 +192,7 @@ infra/
 .github/
   workflows/
     ci.yml
-    infra-plan.yml
-    infra-apply.yml
+    infra.yml
     deploy-eks.yml
 ```
 
@@ -224,15 +220,3 @@ curl http://localhost:8001/docs
 
 Happy Shipping 🚀
 
-```
-
----
-
-### ✅ Commit suggestion
-
-```
-
-docs: overhaul README – full stack (local + AWS), CI/CD & AWS architecture
-
-```
-```
