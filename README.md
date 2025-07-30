@@ -207,6 +207,40 @@ curl http://127.0.0.1:8001/docs
 
 ---
 
+## 🏗️ Composants AWS mobilisés
+
+| Couche               | Service AWS                      | Rôle précis dans l’architecture                                  |
+| -------------------- | -------------------------------- | ---------------------------------------------------------------- |
+| **Réseau**           | VPC                              | Isolation réseau (CIDR `10.0.0.0/16`).                           |
+|                      | Subnets privés & publics         | 3 AZ (eu‑west‑3a/b/c). Privés : nœuds EKS. Publics : LB, NAT GW. |
+|                      | Internet Gateway                 | Accès Internet subnets publics.                                  |
+|                      | NAT Gateway                      | Sortie Internet des nœuds privés.                                |
+|                      | Security Groups                  | Pare‑feu autour du control‑plane, des nœuds et du LB.            |
+| **Calcul**           | EKS (Elastic Kubernetes Service) | Cluster Kubernetes 1.30 managé.                                  |
+|                      | Managed Node Groups              | Nœuds EC2 `t3.medium`, autoscaling 2‑4.                          |
+| **Stockage**         | S3                               | Bucket tfstate, éventuels backups.                               |
+|                      | DynamoDB                         | Table `devopstrack-tf-lock` (lock state).                        |
+|                      | ECR                              | Registre d’images `frontend`, `auth-service`, …                  |
+| **Sécurité**         | IAM roles & policies             | Rôles cluster, nodes + OIDC GitHub.                              |
+|                      | KMS                              | Chiffrement secrets Kubernetes.                                  |
+| **Observabilité**    | CloudWatch Logs & Metrics        | Logs control‑plane & Container Insights.                         |
+| **Réseau app**       | Elastic Load Balancer            | ALB/NLB provisionné via Traefik.                                 |
+| **DNS/TLS (option)** | Route 53 + ACM                   | Domaine & certificats pour Traefik.                              |
+
+**Pourquoi ces choix ?**
+
+1. VPC multi‑AZ : haute dispo.
+2. NAT GW unique : coût ↔ simplicité.
+3. Managed Nodes : patching & autoscaling gérés.
+4. ECR : latence min vers EKS.
+5. S3 + DynamoDB backend : standard Terraform.
+6. OIDC GitHub : pas de clés statiques.
+7. KMS : chiffrement des secrets.
+8. CloudWatch : journaux & alertes intégrés.
+9. ELB automatisé par Traefik.
+
+---
+
 ## ❗ Bonnes pratiques
 
 * Utiliser des bases **managées** en prod (RDS, Atlas…).
