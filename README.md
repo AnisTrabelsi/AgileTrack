@@ -37,8 +37,8 @@ DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines 
 ## 🚀 Lancer en **local** (Docker Compose)
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/AnisTrabelsi/DevOpsTrack.git
+cd DevOpsTrack
 
 # Lancer tous les services (Nexus & SonarQube si activés)
 docker compose -f deploy/compose.yml up --build -d
