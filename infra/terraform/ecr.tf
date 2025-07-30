@@ -1,21 +1,25 @@
-# =====================================================================
-# Création des dépôts ECR (Elastic Container Registry)
-# pour stocker les images Docker des microservices du projet DevOpsTrack
-# =====================================================================
+##############################################################################
+# Dépôts ECR – module v1.7 (simple et robuste)
+##############################################################################
+
+locals {
+  ecr_repos = [
+    "frontend",
+    "auth-service",
+    "projects-service",
+    "tasks-service",
+    "tasks-worker",
+    "metrics-service",
+  ]
+}
 
 module "ecr" {
-  source  = "terraform-aws-modules/ecr/aws"   # Module officiel ECR depuis le registry Terraform
-  version = "~> 1.0"                          # Version du module (1.x)
+  source  = "terraform-aws-modules/ecr/aws"
+  version = "~> 1.7"
 
-  # Liste des dépôts ECR à créer
-  repositories = [
-    "frontend",           # Dépôt pour l’image Docker du frontend React/Angular
-    "projects-service",   # Dépôt pour le microservice Projects (ex: FastAPI + MongoDB)
-    "tasks-service",      # Dépôt pour le microservice Tasks (ex: Node.js + Redis)
-    "tasks-worker",       # Dépôt pour le worker (consommation de jobs asynchrones)
-    "metrics-service"     # Dépôt pour le service Metrics (ex: Go + InfluxDB)
-  ]
+  for_each                = toset(local.ecr_repos)
+  repository_name         = each.value
+  create_lifecycle_policy = false   # pas de policy pour éviter l'erreur 400
 
-  # Optionnel : définir les rôles/ARNs AWS qui auront accès en lecture/écriture
-  repository_read_write_access_arns = []  # Exemple : ["arn:aws:iam::<ACCOUNT-ID>:role/ci-cd-role"]
+  tags = { Project = "devopstrack" }
 }

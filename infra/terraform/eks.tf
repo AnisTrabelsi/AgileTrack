@@ -1,46 +1,47 @@
-# =====================================================================
-# Création du cluster EKS avec le module officiel Terraform
-# (terraform-aws-modules/eks/aws)
-# =====================================================================
+##############################################################################
+# EKS 1.30 – module v20 (provider AWS v5)
+##############################################################################
+
+data "aws_caller_identity" "current" {}
 
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"   # Module officiel EKS depuis le registry Terraform
-  version = "~> 20.0"                         # Version du module (20.x)
+  source  = "terraform-aws-modules/eks/aws"
+  version = "~> 20.0"
 
-  # Nom et version du cluster
-  cluster_name    = var.cluster_name          # Ex : "devopstrack-eks"
-  cluster_version = "1.30"                    # Version Kubernetes du cluster
+  cluster_name    = var.cluster_name
+  cluster_version = "1.30"
 
-  # Intégration réseau
-  vpc_id     = module.vpc.vpc_id              # ID du VPC créé via le module VPC
-  subnet_ids = module.vpc.private_subnets     # Utilisation des sous-réseaux privés pour les nœuds
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets
 
-  # Définition d’un groupe de nœuds managés par EKS
+  # API endpoint public + privé
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+
+  # Node group Spot t3.small
   eks_managed_node_groups = {
     default = {
-      desired_size   = var.desired_capacity   # Taille initiale du groupe (ex: 2 nœuds)
-      max_size       = 4                      # Nombre maximum de nœuds (auto-scaling possible)
-      min_size       = 2                      # Nombre minimum de nœuds
-      instance_types = var.node_instance_types # Types d’instances EC2 utilisées (ex: t3.medium)
+      desired_size   = var.desired_capacity
+      max_size       = 2
+      min_size       = 1
+      instance_types = var.node_instance_types
+      capacity_type  = "SPOT"
     }
   }
 
-  # Tags appliqués à toutes les ressources créées
-  tags = {
-    Project = "devopstrack"
+  # Accès kubectl : entry admin via la nouvelle API access‑entries
+  access_entries = {
+    admin = {
+      principal_arn = data.aws_caller_identity.current.arn
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
   }
-}
 
-# =====================================================================
-# Datasources : récupération des infos du cluster pour le provider Kubernetes
-# =====================================================================
-
-# Récupère les infos principales du cluster EKS (endpoint, CA, etc.)
-data "aws_eks_cluster" "main" {
-  name = module.eks.cluster_name
-}
-
-# Récupère le token d’authentification pour accéder au cluster
-data "aws_eks_cluster_auth" "main" {
-  name = module.eks.cluster_name
+  tags = { Project = "devopstrack" }
 }
