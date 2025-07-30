@@ -2,7 +2,7 @@ name: Terraform
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main, master ]
     paths: [ 'infra/terraform/**' ]
   pull_request:
     paths: [ 'infra/terraform/**' ]
@@ -13,7 +13,7 @@ env:
 
 permissions:
   contents: read
-  id-token: write   # OIDC
+  id-token: write       # OIDC vers AWS
 
 jobs:
   plan:
@@ -35,7 +35,7 @@ jobs:
     needs: plan
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    environment: production     # bouton « Approve » dans GitHub UI
+    environment: production      # bouton « Approve »
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -43,5 +43,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::245040174852:role/gha-eks-deploy
           aws-region: ${{ env.AWS_REGION }}
+
       - run: terraform -chdir=$TF_DIR init -input=false
       - run: terraform -chdir=$TF_DIR apply -auto-approve
