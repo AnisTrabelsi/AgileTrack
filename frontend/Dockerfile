@@ -18,7 +18,7 @@ ARG APP_USER=10001
 RUN adduser -D -u ${APP_USER} appuser
 USER appuser
 
-# Copie la build : fichiers statiques en RO
+# Copie la build : fichiers statiques en R
 COPY --from=build \
      --chown=appuser:appuser \
      --chmod=0444 \
