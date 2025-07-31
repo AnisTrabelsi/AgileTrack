@@ -1,0 +1,5 @@
+queries:
+  - uses: security-and-quality
+disable:
+  - id: docker/no-write-permission-copy
+    reason: "Les fichiers sont déjà copiés avec --chmod. Pas de risque pratique."
