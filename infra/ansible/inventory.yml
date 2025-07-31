@@ -1,0 +1,8 @@
+all:
+  vars:
+    kubeconfig: "{{ lookup('env','KUBECONFIG') | default('~/.kube/config', true) }}"
+    grafana_url: "http://grafana.monitoring.svc.cluster.local"
+    grafana_user: "admin"
+    grafana_password: "prom-operator"
+  hosts:
+    cluster:         # <— nom symbolique, pas d’IP requise

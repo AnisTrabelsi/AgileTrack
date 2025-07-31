@@ -1,0 +1,5 @@
+---
+- name: Apply PrometheusRule
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('file', 'files/alerts-devopstrack.yaml') | from_yaml }}"

@@ -1,0 +1,62 @@
+---
+- name: Add Bitnami repo
+  community.kubernetes.helm_repository:
+    name: bitnami
+    repo_url: https://charts.bitnami.com/bitnami
+
+- name: Install Prometheus + Grafana
+  community.kubernetes.helm:
+    name: kube-prom
+    chart_ref: bitnami/kube-prometheus
+    chart_version: 9.11.0
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    values:
+      grafana:
+        admin:
+          user: admin
+          password: "{{ grafana_admin_pass | default('admin123') }}"
+
+- name: Créer le dossier Grafana « DevOpsTrack »
+  community.grafana.grafana_folder:
+    url: http://grafana.monitoring.svc.cluster.local:80
+    login_username: admin
+    login_password: "{{ grafana_admin_pass | default('admin123') }}"
+    title: DevOpsTrack
+    uid: devopstrack
+
+- name: Pousser les dashboards JSON
+  community.grafana.grafana_dashboard:
+    url: http://grafana.monitoring.svc.cluster.local:80
+    login_username: admin
+    login_password: "{{ grafana_admin_pass | default('admin123') }}"
+    state: present
+    folder_uid: devopstrack
+    overwrite: true
+    dashboard: "{{ lookup('file', item) | from_json }}"
+  loop:
+    - "{{ playbook_dir }}/files/dashboards/build-times.json"
+    - "{{ playbook_dir }}/files/dashboards/service-latency.json"
+
+- name: PrometheusRule | Alerte CPU > 80 %
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      metadata:
+        name: devopstrack-alerts
+        namespace: monitoring
+      spec:
+        groups:
+          - name: devopstrack.rules
+            rules:
+              - alert: HighCPUUsage
+                expr: sum(rate(container_cpu_usage_seconds_total{namespace="devopstrack"}[5m])) > 0.8
+                for: 2m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "CPU > 80 %"
+                  description: "Container CPU usage high for DevOpsTrack"

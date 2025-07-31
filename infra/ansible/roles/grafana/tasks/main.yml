@@ -1,0 +1,28 @@
+---
+# 1) Datasource via ConfigMap
+- name: Create ConfigMap for Grafana datasources
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: grafana-datasources
+        namespace: monitoring
+        labels:
+          grafana_datasource: "1"
+      data:
+        prometheus.yaml: |
+{{ lookup('file', 'files/datasources/prometheus.yaml') | indent(10) }}
+
+# 2) Dashboards via HTTP API
+- name: Import dashboards (Grafana API)
+  community.grafana.grafana_dashboard:
+    grafana_url: "{{ grafana_url }}"
+    grafana_user: "{{ grafana_user }}"
+    grafana_password: "{{ grafana_password }}"
+    path: "{{ item }}"
+    state: present
+    overwrite: true
+  loop: "{{ query('fileglob', 'files/dashboards/*.json') }}"
+  delegate_to: localhost

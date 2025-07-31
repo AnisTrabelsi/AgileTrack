@@ -1,0 +1,13 @@
+---
+- name: Observabilité
+  hosts: eks
+  gather_facts: false
+  roles:
+    - role: observability
+      grafana_admin_pass: admin123
+
+- name: Blue/Green auth-service
+  hosts: eks
+  gather_facts: false
+  roles:
+    - role: bluegreen

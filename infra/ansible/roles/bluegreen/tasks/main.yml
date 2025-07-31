@@ -1,0 +1,51 @@
+---
+- name: Créer le Deployment « v2 » (green)
+  kubernetes.core.k8s:
+    state: present
+    namespace: devopstrack
+    src: "{{ playbook_dir }}/templates/auth-deploy-v2.yaml.j2"
+
+- name: Attendre que les pods soient prêts
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: devopstrack
+    label_selectors:
+      - "app.kubernetes.io/name=auth-service"
+      - "version=v2"
+  register: v2_pods
+  until: v2_pods.resources | selectattr('status.containerStatuses[0].ready','equalto',true) | list | length > 0
+  retries: 15
+  delay: 10
+
+- name: « Weighted » TraefikService 80/20 → 50/50 → 20/80 → 0/100
+  vars:
+    ramp:
+      - { blue: 80, green: 20 }
+      - { blue: 50, green: 50 }
+      - { blue: 20, green: 80 }
+      - { blue: 0 , green: 100 }
+  loop: "{{ ramp }}"
+  loop_control:
+    loop_var: step
+  tasks:
+    - name: Patch weights
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: TraefikService
+          metadata:
+            name: auth-weighted
+            namespace: devopstrack
+          spec:
+            weighted:
+              services:
+                - name: auth-service-blue
+                  port: 8000
+                  weight: "{{ step.blue }}"
+                - name: auth-service-green
+                  port: 8000
+                  weight: "{{ step.green }}"
+    - pause:
+        seconds: 30
