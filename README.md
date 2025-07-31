@@ -18,59 +18,6 @@ DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines 
 
 ---
 
-## 📦 Pré‑requis locaux
-
-Avant de lancer le projet en local, assurez‑vous d’avoir installé :
-
-* **Docker ≥ 20.x**  
-* **Docker Compose**  
-* **kubectl**  
-* **Helm**  
-* **Terraform**  
-* **k3d** (ou Minikube si préféré)
-
----
-
-## 🗺️ Diagramme d’architecture
-
-Le projet repose sur une stack **VPC + EKS + Traefik + bases de données**.  
-Un diagramme (au format **PNG/PlantUML**) illustre les composants principaux :
-
-![Architecture](./docs/architecture.png)
-
-### 🎨 Code PlantUML
-
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-
-rectangle "AWS VPC" {
-  rectangle "EKS Cluster" {
-    [Traefik Ingress] -down-> [Auth Service (Django)]
-    [Traefik Ingress] -down-> [Projects Service (FastAPI)]
-    [Traefik Ingress] -down-> [Tasks Service (Node.js)]
-    [Traefik Ingress] -down-> [Metrics Service (Go)]
-
-    [Auth Service (Django)] --> [PostgreSQL (RDS/local)]
-    [Projects Service (FastAPI)] --> [MongoDB (Atlas/local)]
-    [Tasks Service (Node.js)] --> [Redis (ElasticCache/local)]
-    [Metrics Service (Go)] --> [InfluxDB2]
-
-    [Prometheus] --> [Grafana]
-    [Prometheus] ..> [All Services] : scrape metrics
-  }
-}
-
-cloud "GitHub Actions" {
-  [CI/CD Pipeline] --> [ECR/GHCR Registry]
-  [CI/CD Pipeline] --> [EKS Cluster]
-}
-
-@enduml
-```
-
----
-
 ## ⚙️ Pile technologique
 
 | Couche           | Outils principaux                                                   |
@@ -226,22 +173,6 @@ Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`.
 
 ---
 
-## 📊 Monitoring avancé
-
-En complément des dashboards par défaut :
-
-* **Grafana** : importer des dashboards via Ansible :
-
-```bash
-ansible-playbook -i inventory.yml playbooks/monitoring.yml
-```
-
-Ce playbook installe :
-- Dashboards prédéfinis pour Kubernetes et CI/CD.  
-- PrometheusRules d’alerte (CPU, mémoire, jobs échoués, etc.).  
-
----
-
 ## 📂 Arborescence (racine)
 
 ```
@@ -259,8 +190,6 @@ infra/
   ansible/                    # (playbooks futurs Day‑2)
 .github/
   workflows/                  # CI / Terraform / Deploy
-docs/
-  architecture.png             # Diagramme généré via PlantUML
 ```
 
 ---
@@ -292,5 +221,5 @@ Happy Shipping 🚀
 ### ✅ Commit message suggéré
 
 ```
-docs: add prerequisites, architecture diagram (PlantUML), and advanced monitoring
+docs: update README with full stack (local & AWS), CI/CD, AWS architecture
 ```
