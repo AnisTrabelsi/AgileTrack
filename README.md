@@ -13,7 +13,7 @@ DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines 
 * **Métriques & Logs** : endpoint `/metrics` (Prometheus), stockage InfluxDB.  
 * **Tableau de bord Web** : React 18 (Vite) + Tailwind (graphiques builds & jobs).  
 * **Registry d’images** : **GHCR** (par défaut) – *Nexus 3 optionnel via Compose.*  
-* **Surveillance** : Prometheus scrappe les services, Grafana fournit les dashboards.  
+* **Surveillance** : Prometheus scrappe les services, Grafana fournit les dashboards *(installation automatisée via Ansible)*.  
 * **Pipeline CI/CD** : GitHub Actions → Build → Push GHCR → Déploiement (Terraform + `kubectl`).  
 
 ---
@@ -30,7 +30,7 @@ DevOpsTrack est une **plateforme micro‑services** pour suivre des pipelines 
 | Registry         | **GHCR** · *(Nexus 3 optionnel en local)*                           |
 | CI/CD            | Git & GitHub Actions (SonarCloud + Build & Push)                    |
 | IaC              | Terraform · Ansible (`kubernetes.core.k8s`)                         |
-| Monitoring       | Prometheus · Grafana                                                |
+| Monitoring       | Prometheus · Grafana *(déployés et configurés via Ansible)*         |
 
 ---
 
@@ -110,6 +110,15 @@ kubectl apply -f deploy/k8s/base/all-in-one.yaml
 kubectl -n devopstrack get pods
 ```
 
+### 5) Monitoring via Ansible
+
+```bash
+cd infra/ansible
+ansible-playbook -i inventory.yml playbooks/monitoring.yml
+```
+
+*(Déploie Prometheus Operator + Grafana et configure les dashboards automatiquement.)*
+
 </details>
 
 ---
@@ -154,6 +163,7 @@ aws eks update-kubeconfig --name devopstrack-eks --region eu-west-3
 | **Build & Push**     | `ci.yml`              | 5 images : SHA + `latest` sur **GHCR** |
 | **Plan/Apply Infra** | `infra‑*.yml`         | Terraform (S3 state)                   |
 | **Deploy App**       | `deploy-eks.yml`      | `kubectl apply` des manifests          |
+| **Monitoring**       | `ansible-playbook`    | Déploiement Prometheus/Grafana via Ansible |
 
 Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`.
 
@@ -168,7 +178,7 @@ Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`.
 | **Conteneurs**    | **ECR** (6 repositories)                      |
 | **Stockage**      | S3 (tfstate), DynamoDB (lock)                 |
 | **Sécurité**      | IAM Roles (cluster, nodes, OIDC GitHub) / KMS |
-| **Observabilité** | CloudWatch Logs                               |
+| **Observabilité** | CloudWatch Logs + *(Prometheus/Grafana via Ansible)* |
 | **Exposition**    | ELB (Traefik) + Route 53/ACM (option)         |
 
 ---
@@ -187,7 +197,7 @@ deploy/
     all-in-one.yaml           # Namespace + Apps + Traefik
 infra/
   terraform/                  # VPC, EKS, ECR, KMS
-  ansible/                    # (playbooks futurs Day‑2)
+  ansible/                    # Playbooks (monitoring, day‑2 ops)
 .github/
   workflows/                  # CI / Terraform / Deploy
 ```
@@ -216,10 +226,3 @@ curl http://localhost:8001/docs
 
 Happy Shipping 🚀
 
----
-
-### ✅ Commit message suggéré
-
-```
-docs: update README with full stack (local & AWS), CI/CD, AWS architecture
-```
