@@ -1,12 +1,6 @@
-Parfait — j’ai remplacé l’intro et la section **Fonctionnalités** par ta version pour **AgileTrack**.
-Tu veux aussi changer les autres occurrences (nom du cluster `devopstrack`, répertoire Git `DevOpsTrack`, etc.) ou on garde ces identifiants techniques tels quels ?
-
-En attendant, voici le **README.md complet** prêt à coller :
-
-````markdown
 # AgileTrack
 
-AgileTrack est une plateforme micro-services pour organiser et suivre vos projets agiles : gestion de tâches type **Kanban (To Do / Doing / Done)**, planification de sprints, suivi des tickets, et analyse des performances en temps réel.
+AgileTrack est une plateforme micro-services pour organiser et suivre vos projets agiles : gestion de tâches type **Kanban (To Do / Doing / Done)**, planification de sprints, suivi des tickets et analyse des performances en temps réel.
 
 ---
 
@@ -17,10 +11,10 @@ AgileTrack est une plateforme micro-services pour organiser et suivre vos projet
 * **Module Projets** : création et suivi des projets, dépôts et versions (FastAPI + MongoDB).  
 * **Module Tâches** : gestion des tickets (To Do, Doing, Done), affectation aux membres, suivi en temps réel.  
 * **Tableaux Kanban & Scrum** : visualisation intuitive de l’avancement des équipes.  
-* **Métriques & Rapports** : temps de cycle, vélocité des sprints, burndown charts.  
+* **Métriques & Rapports** : temps de cycle, vélocité de sprint, burndown charts.  
 * **Tableau de bord Web** : React 18 (Vite) + Tailwind (graphiques et vues interactives).  
-* **Notifications** : intégration possible avec Slack / Email pour updates automatiques.  
-* **Surveillance** : Prometheus scrappe les services, Grafana fournit les dashboards *(installation automatisée via Ansible)*.  
+* **Notifications** : intégration possible avec Slack / Email pour mises à jour automatiques.  
+* **Surveillance** : Prometheus collecte les métriques des services, Grafana fournit les dashboards *(installation automatisée via Ansible)*.  
 * **Pipeline CI/CD** : GitHub Actions → Build → Push GHCR → Déploiement (Terraform + `kubectl`).  
 
 ---
@@ -34,7 +28,7 @@ AgileTrack est une plateforme micro-services pour organiser et suivre vos projet
 | Bases de données | PostgreSQL · MongoDB · Redis · InfluxDB                             |
 | Conteneurs       | Docker · Docker Compose                                             |
 | Orchestration    | Kubernetes (k3d en local, **EKS** en prod)                          |
-| Registry         | **GHCR** · *(Nexus 3 optionnel en local)*                           |
+| Registry         | **GHCR** · *(ECR optionnel en prod)*                                |
 | CI/CD            | Git & GitHub Actions (SonarCloud + Build & Push)                    |
 | IaC              | Terraform · Ansible (`kubernetes.core.k8s`)                         |
 | Monitoring       | Prometheus · Grafana *(déployés et configurés via Ansible)*         |
@@ -44,21 +38,21 @@ AgileTrack est une plateforme micro-services pour organiser et suivre vos projet
 ## 🚀 Lancer en **local** (Docker Compose)
 
 ```bash
-git clone https://github.com/AnisTrabelsi/DevOpsTrack.git
-cd DevOpsTrack
+git clone https://github.com/<votre-org>/AgileTrack.git
+cd AgileTrack
 
 # Lancer tous les services (Nexus & SonarQube si activés)
 docker compose -f deploy/compose.yml up --build -d
-````
+```
 
-| Service       | URL par défaut                                               |
-| ------------- | ------------------------------------------------------------ |
-| Auth API      | [http://localhost:8000](http://localhost:8000)               |
-| Projects API  | [http://localhost:8001](http://localhost:8001)               |
-| Tasks API     | [http://localhost:8002](http://localhost:8002)               |
-| Prometheus    | [http://localhost:9090](http://localhost:9090)               |
-| Grafana       | [http://localhost:3000](http://localhost:3000) (admin/admin) |
-| Nexus \*(opt) | [http://localhost:8081](http://localhost:8081)               |
+| Service       | URL par défaut                  |
+| ------------- | --------------------------------|
+| Auth API      | http://localhost:8000           |
+| Projects API  | http://localhost:8001           |
+| Tasks API     | http://localhost:8002           |
+| Prometheus    | http://localhost:9090           |
+| Grafana       | http://localhost:3000 (admin/admin) |
+| Nexus *(opt)* | http://localhost:8081           |
 
 Arrêt & nettoyage :
 
@@ -76,8 +70,8 @@ docker compose -f deploy/compose.yml down -v
 ### 1) Cluster
 
 ```bash
-k3d cluster create devopstrack --servers 1 --agents 2 -p "80:80@loadbalancer"
-kubectl config use-context k3d-devopstrack
+k3d cluster create agiletrack --servers 1 --agents 2 -p "80:80@loadbalancer"
+kubectl config use-context k3d-agiletrack
 ```
 
 ### 2) Pull-secret GHCR
@@ -85,13 +79,13 @@ kubectl config use-context k3d-devopstrack
 ```bash
 kubectl apply -f deploy/k8s/base/namespaces.yaml
 
-kubectl -n devopstrack create secret docker-registry image-pull-ghcr \
+kubectl -n agiletrack create secret docker-registry image-pull-ghcr \
   --docker-server=ghcr.io \
   --docker-username=<gh-user> \
   --docker-password=<PAT> \
   --docker-email=<email>
 
-kubectl -n devopstrack patch serviceaccount default -p \
+kubectl -n agiletrack patch serviceaccount default -p \
   '{"imagePullSecrets":[{"name":"image-pull-ghcr"}]}'
 ```
 
@@ -101,12 +95,12 @@ kubectl -n devopstrack patch serviceaccount default -p \
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo update
 
-helm install auth-db      bitnami/postgresql -n devopstrack \
+helm install auth-db      bitnami/postgresql -n agiletrack \
   --set auth.username=postgres,auth.password=postgres,auth.database=auth
 
-helm install projects-db  bitnami/mongodb    -n devopstrack --set auth.enabled=false
-helm install tasks-redis  bitnami/redis      -n devopstrack --set auth.enabled=false
-helm install metrics-db   bitnami/influxdb2  -n devopstrack \
+helm install projects-db  bitnami/mongodb    -n agiletrack --set auth.enabled=false
+helm install tasks-redis  bitnami/redis      -n agiletrack --set auth.enabled=false
+helm install metrics-db   bitnami/influxdb2  -n agiletrack \
   --set adminUser.username=admin,adminUser.password=admin123,adminUser.token=dev-token
 ```
 
@@ -114,7 +108,7 @@ helm install metrics-db   bitnami/influxdb2  -n devopstrack \
 
 ```bash
 kubectl apply -f deploy/k8s/base/all-in-one.yaml
-kubectl -n devopstrack get pods
+kubectl -n agiletrack get pods
 ```
 
 ### 5) Monitoring via Ansible
@@ -134,12 +128,12 @@ ansible-playbook -i inventory.yml playbooks/monitoring.yml
 
 ### 🔑 Prérequis
 
-| Ressource                                   | Usage                    |
-| ------------------------------------------- | ------------------------ |
-| Bucket S3 `devopstrack-tfstate-*`           | Fichier d’état Terraform |
-| Table DynamoDB `devopstrack-tf-lock`        | Verrouillage état        |
-| Rôle IAM **`gha-eks-deploy`** + OIDC GitHub | `id-token:write` pour CI |
-| Secrets GitHub : `AWS_ROLE_TO_ASSUME`       | ARN du rôle ci-dessus    |
+| Ressource                            | Usage                    |
+| ------------------------------------ | ------------------------ |
+| Bucket S3 `agiletrack-tfstate-*`     | Fichier d’état Terraform |
+| Table DynamoDB `agiletrack-tf-lock`  | Verrouillage état        |
+| Rôle IAM **`gha-eks-deploy`** + OIDC | `id-token:write` pour CI |
+| Secret GitHub `AWS_ROLE_TO_ASSUME`   | ARN du rôle ci-dessus    |
 
 ### 1) Infra (Terraform)
 
@@ -148,7 +142,7 @@ cd infra/terraform
 terraform init
 terraform apply -auto-approve
 
-aws eks update-kubeconfig --name devopstrack-eks --region eu-west-3
+aws eks update-kubeconfig --name agiletrack-eks --region eu-west-3
 ```
 
 ### 2) Pipelines GitHub Actions
@@ -178,15 +172,15 @@ Secrets requis : `SONAR_TOKEN`, `AWS_ROLE_TO_ASSUME`.
 
 ## 🏗️ Composants **AWS** mobilisés
 
-| Couche            | Services AWS                                         |
-| ----------------- | ---------------------------------------------------- |
-| **Réseau**        | VPC, Subnets (3× AZ), IGW, NAT GW, SG                |
-| **Calcul**        | **EKS** 1.30 + Managed Nodes Spot                    |
-| **Conteneurs**    | **ECR** (6 repositories)                             |
-| **Stockage**      | S3 (tfstate), DynamoDB (lock)                        |
-| **Sécurité**      | IAM Roles (cluster, nodes, OIDC GitHub) / KMS        |
-| **Observabilité** | CloudWatch Logs + *(Prometheus/Grafana via Ansible)* |
-| **Exposition**    | ELB (Traefik) + Route 53/ACM (option)                |
+| Couche            | Services AWS / assoc.                                  |
+| ----------------- | ------------------------------------------------------ |
+| **Réseau**        | VPC, Subnets (3× AZ), IGW, NAT GW, SG                  |
+| **Calcul**        | **EKS** 1.30 + Managed Nodes Spot                      |
+| **Conteneurs**    | *(Registry externe : GHCR ; ECR optionnel)*            |
+| **Stockage**      | S3 (tfstate), DynamoDB (lock)                          |
+| **Sécurité**      | IAM Roles (cluster, nodes, OIDC GitHub) / KMS          |
+| **Observabilité** | CloudWatch Logs + *(Prometheus/Grafana via Ansible)*   |
+| **Exposition**    | ELB (Traefik) + Route 53/ACM (option)                  |
 
 ---
 
@@ -215,8 +209,8 @@ infra/
 
 ```bash
 kubectl get nodes
-kubectl -n devopstrack get pods
-kubectl -n devopstrack port-forward svc/projects-service 8001:8001 &
+kubectl -n agiletrack get pods
+kubectl -n agiletrack port-forward svc/projects-service 8001:8001 &
 curl http://localhost:8001/docs
 ```
 
@@ -225,15 +219,10 @@ curl http://localhost:8001/docs
 ## 🔥 Bonnes pratiques & suites
 
 * Migrer les bases vers **services managés** (RDS, Atlas…).
-* Externaliser les secrets avec **AWS Secrets Manager + External-Secrets**.
+* Externaliser les secrets avec **AWS Secrets Manager + External Secrets**.
 * Ajouter des probes `/healthz`, HPA/KEDA.
 * Helm Charts + GitOps (*Argo CD*).
-* Affiner le rôle `gha-eks-deploy` (least-privilege).
-* Centraliser logs (e.g. Loki) & traces (OTel).
+* Affiner le rôle `gha-eks-deploy` (least privilege).
+* Centraliser logs (ex. Loki) & traces (OTel).
 
 Happy Shipping 🚀
-
-```
-
-Tu veux que je te génère le **fichier** téléchargeable (`README-AgileTrack.md`) ? Je peux te le déposer en 2 secondes.
-```
