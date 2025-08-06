@@ -1,6 +1,6 @@
-# AgileTrack
+# DevOpsTrack
 
-AgileTrack est une plateforme micro-services pour organiser et suivre vos projets agiles : gestion de tâches type **Kanban (To Do / Doing / Done)**, planification de sprints, suivi des tickets et analyse des performances en temps réel.
+DevOpsTrack est une plateforme micro-services pour organiser et suivre vos projets agiles : gestion de tâches type **Kanban (To Do / Doing / Done)**, planification de sprints, suivi des tickets et analyse des performances en temps réel.
 
 ---
 
@@ -226,4 +226,5 @@ curl http://localhost:8001/docs
 * Centraliser logs (ex. Loki) & traces (OTel).
 
 Happy Shipping 🚀
+
 
